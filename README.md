@@ -83,6 +83,7 @@ These operating systems are supported:
 ## Features
 
 - A map of the agents. The map shows the surface, the sessions, the sub-agents, and the data destinations.
+- Sub-agents use diamond markers and sit beneath their parent in a bordered group, with their status and current task below the name. Narrow windows scroll the map instead of squeezing its labels. Select a marker for full details in the side panel.
 - A live feed of the data flows, with the tool and the command of each flow.
 - The model tokens for each model. This includes models that you configure with your own key (BYOK).
 - A side panel with the prompt, the folder, the model, and the sub-agents of the selected session.

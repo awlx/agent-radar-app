@@ -57,8 +57,8 @@ func (*Source) Snapshot() *collector.Snapshot {
 		Intent:        "Running the test suite",
 		RunningTools:  []collector.Tool{{ID: "t1", Name: "bash", Desc: "$ go test ./...", StartedAt: ago(6), Sink: "Shell"}},
 		Subagents: []collector.Subagent{
-			{ID: "a1", Name: "explore", Type: "explore", Model: haiku, StartedAt: ago(40), LastAt: ago(3), Said: "Find all HTTP handlers that need the limiter.", Running: true},
-			{ID: "a2", Name: "code-review", Type: "code-review", Model: gpt, StartedAt: ago(15), LastAt: ago(1), Said: "Review the rate limiter change.", Running: true},
+			{ID: "a1", Name: "explore", Type: "explore", Model: haiku, StartedAt: ago(40), LastAt: ago(3), Doing: "Finding HTTP handlers", Said: "Find all HTTP handlers that need the limiter.", Running: true},
+			{ID: "a2", Name: "code-review", Type: "code-review", Model: gpt, StartedAt: ago(15), LastAt: ago(1), Doing: "Reviewing the rate limiter", Said: "Review the rate limiter change.", Running: true},
 		},
 		Flows: recent(now, []flowSpec{
 			{sink: "LLM: " + sonnet, tool: "model", desc: sonnet, model: sonnet, every: 7000, offset: 0, tokens: 48_000},

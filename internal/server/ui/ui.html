@@ -25,11 +25,12 @@
   header .live { width: 8px; height: 8px; border-radius: 50%; background: var(--ok, #3fb950); box-shadow: 0 0 8px var(--ok, #3fb950); animation: blink 1.6s infinite; }
   header .live.off { background: var(--bad, #f85149); box-shadow: 0 0 8px var(--bad, #f85149); animation: none; }
   @keyframes blink { 50% { opacity: .35; } }
-  #stage { position: relative; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; }
+  #stage { position: relative; min-width: 0; min-height: 0; overflow: auto; }
   canvas { width: 100%; display: block; }
   #legend { position: sticky; bottom: 0; margin-top: -28px; padding: 6px 10px; display: flex; flex-wrap: wrap; gap: 10px; color: var(--text-color-muted, #8b949e); pointer-events: none;
     background: color-mix(in srgb, var(--background-color-default, #0d1117) 85%, transparent); }
   #legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; background: var(--c); }
+  #legend .subagent::before { border-radius: 0; transform: rotate(45deg); }
   #tip { position: absolute; pointer-events: none; max-width: 360px; padding: 8px 10px; border-radius: 8px; display: none;
     background: color-mix(in srgb, var(--background-color-default, #0d1117) 92%, transparent);
     border: 1px solid var(--border-color-default, #30363d); box-shadow: 0 8px 24px rgba(0,0,0,.35); line-height: 1.45; z-index: 3; }
@@ -158,7 +159,7 @@ function updateTheme() {
   if (next === P && document.getElementById("legend").innerHTML) return false;
   P = next;
   for (const k of ["ok", "warn", "bad"]) document.body.style.setProperty("--" + k, P[k]);
-  document.getElementById("legend").innerHTML = [["Copilot app", P.app], ["VS Code agent", P.vscode], ["VS Code chat", P.chat], ["LLM", P.llm], ["data sink ▢", P.other], ["session ↔ session", P.cli]]
+  document.getElementById("legend").innerHTML = `<span class="subagent" style="--c:${P.other}">sub-agent (under parent)</span>` + [["Copilot app", P.app], ["VS Code agent", P.vscode], ["VS Code chat", P.chat], ["LLM", P.llm], ["data sink ▢", P.other], ["session ↔ session", P.cli]]
     .map(([n, c]) => `<span style="--c:${c}">${n}</span>`).join("");
   return true;
 }
@@ -176,14 +177,13 @@ const ago = (t) => { if (!t) return ""; const s = Math.max(0, (Date.now() - t) /
 
 const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
 const tip = document.getElementById("tip"), stage = document.getElementById("stage");
-// The canvas is as high as the visible stage, or higher when the rows need more space.
-// Then the stage scrolls, so that all rows stay readable.
+// Scroll rather than compress the hierarchy or let adjacent labels overlap.
 let W = 0, H = 0, DPR = 1, contentH = 0;
 function resize() {
   DPR = window.devicePixelRatio || 1;
-  const w = stage.clientWidth, h = Math.max(stage.clientHeight, contentH);
+  const w = Math.max(900, stage.clientWidth), h = Math.max(stage.clientHeight, contentH);
   if (w === W && h === H && cv.width === Math.round(w * DPR)) return;
-  W = w; H = h; cv.style.height = H + "px"; cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  W = w; H = h; cv.style.width = W + "px"; cv.style.height = H + "px"; cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
 }
 resize();
 
@@ -261,31 +261,32 @@ function build(snap) {
 
   // Vertical slots.
   let sessSlots = 0;
-  for (const g of hubList) { for (const s of g.sessions) sessSlots += Math.max(1, s.subagents.length) + .4; sessSlots += .8; }
+  for (const g of hubList) { for (const s of g.sessions) sessSlots += 1 + s.subagents.length + .4; sessSlots += .8; }
   let sinkSlots = sinks.length + new Set(sinks.map(sinkGroup)).size * .9;
-  const total = Math.max(sessSlots, sinkSlots, 1);
-  const top = 46, bottom = 34, MIN_SLOT = 22;
-  contentH = top + bottom + total * MIN_SLOT;
+  const top = 46, bottom = 54, MIN_SLOT = 52;
+  contentH = top + bottom + Math.max(sessSlots * MIN_SLOT, sinkSlots * 28, MIN_SLOT);
   resize();
   const usable = H - top - bottom;
-  const slot = Math.max(MIN_SLOT, Math.min(64, usable / total));
-  const X = { you: 36, hub: Math.max(110, W * .14), sess: W * .30, agent: W * .56, sink: W - 30 };
-  headers = [["SURFACE", X.hub], ["SESSIONS", X.sess], ["SUB-AGENTS", X.agent], ["DATA DESTINATIONS", X.sink, "right"]];
+  const slot = Math.max(MIN_SLOT, Math.min(64, usable / Math.max(sessSlots, 1)));
+  const sinkSlot = Math.max(28, Math.min(44, usable / Math.max(sinkSlots, 1)));
+  const X = { you: 36, hub: W * .13, sess: W * .28, agent: W * .28 + 28, sink: W - 30 };
+  const familyRight = W * .65;
+  headers = [["SURFACE", X.hub], ["SESSIONS & SUB-AGENTS", X.sess - 18, "left"], ["DATA DESTINATIONS", X.sink, "right"]];
 
   let y = top + Math.max(0, (usable - sessSlots * slot) / 2) + slot / 2;
   const hubYs = [];
   for (const g of hubList) {
     const ys = [];
     for (const s of g.sessions) {
-      const rows = Math.max(1, s.subagents.length);
-      const sy = y + (rows - 1) * slot / 2;
+      const rows = 1 + s.subagents.length;
+      const sy = y;
       const sid = "s:" + s.id, color = surfaceColor(s.surface);
-      upsert(sid, { type: "session", label: s.name, color, s, tx: X.sess, ty: sy, r: 7 });
+      upsert(sid, { type: "session", label: s.name, color, s, tx: X.sess, ty: sy, r: 7, rows, slot, familyRight, labelWidth: familyRight - X.sess - 30 });
       ys.push(sy);
       L(g.hub.id, sid, { color, kind: "own", active: s.busy });
       s.subagents.forEach((a, i) => {
         const aid = "a:" + s.id + ":" + a.id;
-        upsert(aid, { type: "agent", label: a.name, color, a, parent: s, tx: X.agent, ty: y + i * slot, r: a.running ? 5 : 3.5 });
+        upsert(aid, { type: "agent", label: a.name, color, a, parent: s, tx: X.agent, ty: y + (i + 1) * slot, r: 7, labelWidth: familyRight - X.agent - 30 });
         L(sid, aid, { color, kind: "sub", active: a.running });
       });
       y += (rows + .4) * slot;
@@ -299,12 +300,12 @@ function build(snap) {
   upsert("you", { type: "you", label: "You", color: P.warn, tx: X.you, ty: hubYs.length ? hubYs.reduce((a, b) => a + b, 0) / hubYs.length : top + usable / 2, r: 12 });
 
   groupLabels = [];
-  let sy = top + Math.max(0, (usable - sinkSlots * slot) / 2) + slot / 2, lastG = -1;
+  let sy = top + Math.max(0, (usable - sinkSlots * sinkSlot) / 2) + sinkSlot / 2, lastG = -1;
   for (const k of sinks) {
     const g = sinkGroup(k);
-    if (g !== lastG) { sy += .9 * slot * (lastG === -1 ? .6 : 1); groupLabels.push([GROUP_NAMES[g], sy - slot * .75]); lastG = g; }
+    if (g !== lastG) { sy += .9 * sinkSlot * (lastG === -1 ? .6 : 1); groupLabels.push([GROUP_NAMES[g], sy - sinkSlot * .75]); lastG = g; }
     upsert("k:" + k, { type: "sink", label: k, color: sinkColor(k), tx: X.sink, ty: sy, r: 7 });
-    sy += slot;
+    sy += sinkSlot;
   }
   for (const e of edges) {
     const fresh = Math.max(0, 1 - (now - e.at) / 120e3);
@@ -329,6 +330,7 @@ new ResizeObserver(() => { resize(); build(snapshot); }).observe(stage);
 // ---------- Geometry ----------
 function curve(l) {
   const a = nodes.get(l.a), b = nodes.get(l.b);
+  if (l.kind === "sub") return [a.x, a.y + a.r, a.x, b.y, a.x, b.y, b.x - b.r, b.y];
   if (l.kind === "peer") { const off = 40 + Math.abs(b.y - a.y) * .25; return [a.x, a.y, a.x - off, a.y, b.x - off, b.y, b.x, b.y]; }
   const dx = (b.x - a.x) * .5;
   return [a.x, a.y, a.x + dx, a.y, b.x - dx, b.y, b.x, b.y];
@@ -357,12 +359,19 @@ function spawnParticles(t) {
 // ---------- Render ----------
 const css = getComputedStyle(document.body);
 const cssv = (n, d) => css.getPropertyValue(n).trim() || d;
-function label(text, x, y, align, font, color, max) {
+function label(text, x, y, align, font, color, max, maxWidth = Infinity) {
   text = String(text).slice(0, max * 4).replace(/\s+/g, " ");
   if (text.length > max) text = text.slice(0, max - 1) + "…";
   ctx.font = font; ctx.textAlign = align; ctx.textBaseline = "middle";
+  if (ctx.measureText(text).width > maxWidth) {
+    while (text && ctx.measureText(text + "…").width > maxWidth) text = text.slice(0, -1);
+    text = text ? text + "…" : "";
+  }
   ctx.lineWidth = 4; ctx.strokeStyle = cssv("--background-color-default", "#0d1117"); ctx.strokeText(text, x, y);
   ctx.fillStyle = color; ctx.fillText(text, x, y);
+}
+function diamond(x, y, r) {
+  ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath();
 }
 function draw(t) {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -372,13 +381,15 @@ function draw(t) {
   const ease = reduceMotion ? 1 : .14;
   for (const n of nodes.values()) { n.x += (n.tx - n.x) * ease; n.y += (n.ty - n.y) * ease; }
 
-  // Column headers + session row bands.
+  // A family band includes the parent row and every visible child row.
   for (const [h, x, al] of headers) label(h, x, 22, al || "center", `600 10px ${sans}`, muted, 40);
   for (const [g, y] of groupLabels) label(g, W - 30, y, "right", `600 9px ${sans}`, muted, 40);
-  for (const n of nodes.values()) if (n.type === "session" && (n.s.busy || n.s.waiting)) {
+  for (const n of nodes.values()) if (n.type === "session") {
+    const x = n.x - 18, y = n.y - n.slot / 2 + 4, w = n.familyRight - x, h = n.rows * n.slot - 8;
     ctx.globalAlpha = .05; ctx.fillStyle = n.s.waiting ? P.warn : n.color;
-    const rows = Math.max(1, n.s.subagents.length), h = rows * 30;
-    ctx.fillRect(nodes.get("you") ? 0 : 0, n.y - h / 2 - 4, W, h + 8);
+    ctx.fillRect(x, y, w, h);
+    ctx.globalAlpha = .25; ctx.strokeStyle = n.color; ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, w, h);
   }
   ctx.globalAlpha = 1;
 
@@ -405,8 +416,8 @@ function draw(t) {
   for (const l of links) {
     const c = l._c = curve(l);
     const heat = l.active ? 1 : (l.heat ?? .3);
-    ctx.globalAlpha = !inFocus(l) ? .04 : l.kind === "flow" ? .10 + heat * .45 : l.kind === "peer" ? .2 + heat * .6 : .35;
-    ctx.strokeStyle = l.color; ctx.lineWidth = l.kind === "flow" ? 1 + Math.min(2.5, (l.w || 1) * .35) : 1.3;
+    ctx.globalAlpha = !inFocus(l) ? .04 : l.kind === "flow" ? .10 + heat * .45 : l.kind === "peer" ? .2 + heat * .6 : l.kind === "sub" ? .7 : .35;
+    ctx.strokeStyle = l.color; ctx.lineWidth = l.kind === "flow" ? 1 + Math.min(2.5, (l.w || 1) * .35) : l.kind === "sub" ? 2 : 1.3;
     ctx.setLineDash(l.dashed ? [4, 4] : []);
     ctx.beginPath(); ctx.moveTo(c[0], c[1]); ctx.bezierCurveTo(c[2], c[3], c[4], c[5], c[6], c[7]); ctx.stroke();
   }
@@ -431,29 +442,44 @@ function draw(t) {
     if (busy || waiting) {
       const ph = reduceMotion ? .3 : (t / (waiting ? 600 : 1400)) % 1, a0 = ctx.globalAlpha;
       ctx.strokeStyle = waiting ? P.warn : n.color; ctx.lineWidth = 1.5;
-      ctx.globalAlpha = a0 * (1 - ph); ctx.beginPath(); ctx.arc(x, y, r + 3 + ph * 10, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = a0 * (1 - ph); ctx.beginPath();
+      if (n.type === "agent") diamond(x, y, r + 3 + ph * 10);
+      else ctx.arc(x, y, r + 3 + ph * 10, 0, Math.PI * 2);
+      ctx.stroke();
       ctx.globalAlpha = a0;
     }
     ctx.fillStyle = n.color; ctx.strokeStyle = n.color; ctx.lineWidth = 2;
     ctx.shadowColor = n.color; ctx.shadowBlur = busy ? 10 : 0;
     ctx.beginPath();
     if (n.type === "sink") { ctx.rect(x - r, y - r, r * 2, r * 2); ctx.fillStyle = n.color + "33"; ctx.fill(); ctx.stroke(); }
+    else if (n.type === "agent") {
+      diamond(x, y, r);
+      ctx.fillStyle = cssv("--background-color-default", "#0d1117"); ctx.fill();
+      if (n.a.running) { ctx.fillStyle = n.color + "55"; ctx.fill(); }
+      ctx.stroke();
+    }
     else if (n.type === "hub") { for (let i = 0; i < 6; i++) { const a = Math.PI / 3 * i + Math.PI / 6; ctx[i ? "lineTo" : "moveTo"](x + Math.cos(a) * r, y + Math.sin(a) * r); } ctx.closePath(); ctx.fill(); }
     else ctx.arc(x, y, r, 0, Math.PI * 2), ctx.fill();
     ctx.shadowBlur = 0;
-    if (n === selected) { ctx.strokeStyle = text; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2); ctx.stroke(); }
+    if (n === selected) {
+      ctx.strokeStyle = text; ctx.lineWidth = 1.5; ctx.beginPath();
+      if (n.type === "agent") diamond(x, y, r + 5);
+      else ctx.arc(x, y, r + 5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
-    const colW = (W * .56 - W * .30) / 7.2;
     if (n.type === "you") label("You", x, y + r + 12, "center", `600 11px ${sans}`, text, 10);
-    else if (n.type === "hub") label(n.label, x, y - r - 9, "center", `600 11px ${sans}`, text, 28);
+    else if (n.type === "hub") label(n.label, x, y - r - 9, "center", `600 11px ${sans}`, text, 28, W * .22 - 20);
     else if (n.type === "session") {
-      label(n.label, x + r + 8, y - 6, "left", `600 12px ${sans}`, text, Math.max(16, colW | 0));
+      label(n.label, x + r + 8, y - 6, "left", `600 12px ${sans}`, text, 100, n.labelWidth);
       const s = n.s, tl = s.runningTools[0];
       const doing = s.waiting ? "⏳ waiting for you" : tl ? `▸ ${tl.name}${tl.desc ? ": " + tl.desc : ""}` : !s.busy ? "○ idle" : s.intent ? "▸ " + s.intent : "▸ thinking";
-      label(doing, x + r + 8, y + 9, "left", `10px ${mono}`, s.waiting ? P.warn : muted, Math.max(18, (colW * 1.15) | 0));
+      label(doing, x + r + 8, y + 9, "left", `10px ${mono}`, s.waiting ? P.warn : muted, 100, n.labelWidth);
     } else if (n.type === "agent") {
-      label(n.label + (n.a.model ? "  · " + n.a.model : ""), x + r + 7, y, "left", `500 11px ${sans}`, n.a.running ? text : muted, 44);
-    } else if (n.type === "sink") label(n.label, x - r - 8, y, "right", `500 11px ${sans}`, text, 26);
+      label(n.label, x + r + 7, y - 15, "left", `600 12px ${sans}`, n.a.running ? text : muted, 100, n.labelWidth);
+      label((n.a.running ? "Running" : "Done") + (n.a.model ? " · " + n.a.model : ""), x + r + 7, y, "left", `11px ${sans}`, n.a.running ? P.ok : muted, 100, n.labelWidth);
+      label(n.a.doing || (n.a.running ? "Thinking" : "Task complete"), x + r + 7, y + 15, "left", `11px ${mono}`, muted, 100, n.labelWidth);
+    } else if (n.type === "sink") label(n.label, x - r - 8, y, "right", `500 11px ${sans}`, text, 100, W * .30 - 30);
   }
   ctx.globalAlpha = 1;
 }

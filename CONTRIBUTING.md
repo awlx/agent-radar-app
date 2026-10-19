@@ -9,6 +9,7 @@ Thank you for your help. Issues and pull requests are welcome.
 3. If you change the macOS app, run `./macos/build-app.sh` on a Mac.
 4. If you change the Windows app, run `./windows/build-app.sh` and `GOOS=windows go vet ./...`. The CI does a smoke test of the Windows app.
 5. If you change the UI, add a screenshot from `copilot-radar -demo`.
+6. If you change the graph, run `node --test internal/server/ui/graph.test.mjs` with Node.js 18 or later.
 
 ## Rules
 

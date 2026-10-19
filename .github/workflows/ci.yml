@@ -24,6 +24,10 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test ./...
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test internal/server/ui/graph.test.mjs
 
   macos-app:
     runs-on: macos-latest
