@@ -8,13 +8,14 @@ const source = html.split("<script>")[1].split("// ---------- Panels ----------"
 const panelSource = html.split("<script>")[1].split("// Feed resize grip")[0];
 
 function graph(width = 1000, height = 500, panels = false) {
-  const labels = [], paths = [];
+  const labels = [], paths = [], arcs = [];
   const ctx = new Proxy({
     measureText: (text) => ({ width: text.length * 8 }),
     getImageData: () => ({ data: [13, 17, 23, 255] }),
     fillText: (text, x, y) => labels.push({ text, x, y }),
     moveTo: (x, y) => paths.push(["move", x, y]),
     lineTo: (x, y) => paths.push(["line", x, y]),
+    arc: (x, y, r) => arcs.push({ x, y, r }),
   }, { get: (target, key) => key in target ? target[key] : () => {} });
   const elements = new Map();
   const element = (id) => {
@@ -37,7 +38,9 @@ function graph(width = 1000, height = 500, panels = false) {
   vm.createContext(sandbox);
   vm.runInContext((panels ? panelSource : source) + `
     reduceMotion = true;
-    globalThis.graph = { build, draw, pick, toggleSelect, nodeInfo, label, nodes,
+    globalThis.graph = { build, draw, pick, toggleSelect, nodeInfo, label, nodes, focusedNodes, messagePoint, drawMessages,
+      setReducedMotion(value) { reduceMotion = value; },
+      get messagePulses() { return messagePulses; },
       get links() { return links; }, get selected() { return selected; },
       get size() { return [W, H]; } };
   `, sandbox);
@@ -45,7 +48,7 @@ function graph(width = 1000, height = 500, panels = false) {
   sandbox.sidebarArgs = null;
   sandbox.highlightCard = () => {};
   element("showIdle");
-  return { api: sandbox.graph, elements, labels, paths };
+  return { api: sandbox.graph, elements, labels, paths, arcs };
 }
 
 function session(id, count = 0) {
@@ -62,9 +65,10 @@ function session(id, count = 0) {
 const snapshot = (...sessions) => ({ now: Date.now(), sessions, ides: [] });
 
 test("children stay below and inside their parent group, including large batches", () => {
-  const { api } = graph(420);
+  const { api, elements } = graph(420);
   api.build(snapshot(session("one", 40), session("two", 3)));
   assert.equal(api.size[0], 900);
+  assert.equal(elements.get("graphHint").hidden, false);
   assert.ok(api.size[1] > 2200);
   const parent = api.nodes.get("s:one"), next = api.nodes.get("s:two");
   const children = [...api.nodes.values()].filter((n) => n.parent?.id === "one");
@@ -195,4 +199,151 @@ test("background shells stay visible under idle or disconnected owners without b
   api.build(snapshot(s));
   assert.equal(api.nodes.has(parent.id), false);
   assert.equal(elements.get("sShell").textContent, 0);
+});
+
+test("idle parent → child session → subagent remains a durable, nested ownership chain", () => {
+  const { api, elements, labels } = graph(420, 500, true);
+  const parent = session("parent"), child = session("child", 2), sibling = session("sibling");
+  parent.busy = false;
+  parent.surface = "Copilot app";
+  parent.childSessions = [child.id, sibling.id];
+  parent.peers = [{ to: child.id, kind: "spawn", at: Date.now() - 86400000 }];
+  child.surface = "Copilot CLI";
+  child.backgroundShells = [{ id: "server", pid: 123, startedAt: Date.now() }];
+  child.flows = [{ sink: "Filesystem", agentId: "child-0", endAt: Date.now() }];
+  api.build(snapshot(child, sibling, parent));
+  const root = api.nodes.get("s:parent"), branch = api.nodes.get("s:child");
+  const worker = api.nodes.get("a:child:child-0"), shell = api.nodes.get("b:child:server");
+  assert.ok(root.s.contextOnly);
+  assert.equal(branch.parentSessionID, root.id);
+  assert.ok(branch.tx > root.tx && worker.tx > branch.tx);
+  assert.ok(branch.ty > root.ty && worker.ty > branch.ty);
+  assert.ok(shell.ty + 20 < branch.ty + (branch.rows - .5) * branch.slot);
+  assert.ok(shell.ty + 20 < root.ty + (root.rows - .5) * root.slot);
+  assert.equal(api.links.filter((l) => l.kind === "child").length, 2);
+  assert.ok(!api.links.some((l) => l.kind === "own" && l.b === branch.id));
+  assert.ok(!api.links.some((l) => l.kind === "peer"));
+  const focused = api.focusedNodes(worker);
+  assert.ok(focused.has(root.id) && focused.has(branch.id) && focused.has("k:Filesystem"));
+  assert.ok(!focused.has("s:sibling") && !focused.has(shell.id) && !focused.has("a:child:child-1"));
+  const sinkFocus = api.focusedNodes(api.nodes.get("k:Filesystem"));
+  assert.ok(sinkFocus.has(root.id) && sinkFocus.has(worker.id));
+  assert.ok(!sinkFocus.has("s:sibling"));
+  api.draw(1000);
+  assert.ok(labels.some((l) => l.text.startsWith("Idle parent context")));
+  assert.ok(labels.some((l) => l.text.startsWith("Child session")));
+  assert.match(api.nodeInfo(branch), /Child session of Parent parent/);
+  assert.equal(elements.get("sBusy").textContent, 2);
+  assert.equal(elements.get("sSub").textContent, 2);
+  assert.equal(elements.get("sShell").textContent, 1);
+  child.busy = false;
+  child.subagents.forEach((a) => a.running = false);
+  child.backgroundShells = [];
+  sibling.busy = false;
+  api.build(snapshot(parent, child, sibling));
+  assert.equal(api.nodes.has(root.id), false);
+  elements.get("showIdle").checked = true;
+  api.build(snapshot(parent, child, sibling));
+  assert.equal(api.nodes.get(branch.id).parentSessionID, root.id);
+});
+
+test("messages travel once along ownership in the correct direction, without extra edges", () => {
+  const { api } = graph();
+  const a = session("a"), b = session("b");
+  a.childSessions = [b.id];
+  const snap = snapshot(a, b);
+  a.peers = [{ id: "history", to: b.id, kind: "message", at: snap.now - 1000 }];
+  api.build(snap);
+  assert.equal(api.messagePulses.length, 0);
+  a.peers.push({ id: "new", to: b.id, kind: "message", at: snap.now + 1 });
+  snap.now += 2;
+  api.build(snap);
+  api.draw(1000);
+  assert.equal(api.messagePulses.length, 1);
+  const forward = api.messagePulses[0], source = api.nodes.get("s:a"), target = api.nodes.get("s:b");
+  assert.equal(api.messagePoint(forward, 0)[1], source.y + source.r);
+  assert.equal(api.messagePoint(forward, 1)[1], target.y);
+  assert.equal(api.links.filter((l) => l.kind === "child").length, 1);
+  assert.ok(!api.links.some((l) => l.kind === "peer"));
+  api.build(snap);
+  assert.equal(api.messagePulses.length, 1);
+  b.peers.push({ id: "reply", to: a.id, kind: "message", at: snap.now + 1 });
+  snap.now += 2;
+  api.build(snap);
+  const reverse = api.messagePulses[1];
+  assert.equal(api.messagePoint(reverse, 0)[1], target.y);
+  assert.equal(api.messagePoint(reverse, 1)[1], source.y + source.r);
+  api.drawMessages(2201);
+  assert.equal(api.messagePulses.length, 0);
+  api.build(snap);
+  assert.equal(api.messagePulses.length, 0);
+});
+
+test("unrelated messages are transient only and reduced motion stays stationary", () => {
+  const { api, arcs } = graph();
+  const a = session("a"), b = session("b");
+  const snap = snapshot(a, b);
+  api.build(snap);
+  a.peers.push({ id: "new", to: b.id, kind: "message", at: snap.now + 1 });
+  snap.now += 2;
+  api.build(snap);
+  const receiver = api.nodes.get("s:b");
+  assert.equal(receiver.parentSessionID, null);
+  assert.ok(!api.links.some((l) => l.kind === "child" || l.kind === "peer"));
+  api.drawMessages(1000);
+  api.drawMessages(1800);
+  assert.deepEqual(arcs.slice(-2), [
+    { x: receiver.x, y: receiver.y - receiver.r - 7, r: 3.5 },
+    { x: receiver.x, y: receiver.y - receiver.r - 7, r: 3.5 },
+  ]);
+  api.setReducedMotion(false);
+  const pulse = api.messagePulses[0];
+  assert.notEqual(api.messagePoint(pulse, .2)[1], api.messagePoint(pulse, .8)[1]);
+  api.drawMessages(2201);
+  assert.equal(api.messagePulses.length, 0);
+  const message = a.peers.pop();
+  api.build(snap);
+  a.peers.push(message);
+  api.build(snap);
+  assert.equal(api.messagePulses.length, 0);
+});
+
+test("nested ancestry is cycle safe, deterministic, and never creates missing or alias nodes", () => {
+  const { api } = graph(420);
+  const a = session("a"), b = session("b"), c = session("c", 1);
+  a.busy = b.busy = false;
+  a.childSessions = [b.id, "missing-app-alias", a.id];
+  b.childSessions = [c.id];
+  c.childSessions = [a.id];
+  api.build(snapshot(c, b, a));
+  assert.ok(api.nodes.has("s:a") && api.nodes.has("s:b") && api.nodes.has("s:c"));
+  assert.ok(!api.nodes.has("s:missing-app-alias"));
+  assert.equal(api.links.filter((l) => l.kind === "child").length, 2);
+  assert.ok(api.nodes.get("s:a").ty < api.nodes.get("s:b").ty);
+  assert.ok(api.nodes.get("s:b").ty < api.nodes.get("s:c").ty);
+  assert.ok(api.size[0] >= 1060);
+});
+
+test("resumed background agents reappear under the same owner, completed history stays opt-in", () => {
+  const { api, elements } = graph(1000, 500, true);
+  const s = session("owner", 4);
+  s.busy = false;
+  s.backgroundShells = [{ id: "server", pid: 123, startedAt: Date.now() }];
+  s.subagents.forEach((a) => { a.running = false; a.mode = "background"; });
+  api.build(snapshot(s));
+  assert.equal([...api.nodes.values()].filter((n) => n.type === "agent").length, 0);
+  assert.match(elements.get("subHistory").textContent, /4 inactive hidden/);
+  elements.get("showIdle").checked = true;
+  api.build(snapshot(s));
+  assert.equal([...api.nodes.values()].filter((n) => n.type === "agent").length, 4);
+  assert.equal(elements.get("subHistory").textContent, " · 4 inactive");
+  elements.get("showIdle").checked = false;
+  s.subagents[3].running = true;
+  s.flows = [{ sink: "Filesystem", agentId: "child-3", endAt: Date.now() }];
+  api.build(snapshot(s));
+  assert.equal([...api.nodes.values()].filter((n) => n.type === "agent").length, 1);
+  assert.match(elements.get("subHistory").textContent, /3 inactive hidden/);
+  assert.equal(api.links.find((l) => l.kind === "flow").a, "a:owner:child-3");
+  assert.equal(api.nodes.get("a:owner:child-3").parent.id, s.id);
+  assert.equal(api.nodes.get("b:owner:server").type, "shell");
 });

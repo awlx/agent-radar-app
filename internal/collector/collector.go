@@ -62,6 +62,7 @@ type Session struct {
 	BackgroundShells []BackgroundShell      `json:"backgroundShells,omitempty"`
 	Flows            []Flow                 `json:"flows"`
 	Peers            []Peer                 `json:"peers"`
+	ChildSessions    []string               `json:"childSessions,omitempty"`
 	Tokens           TokenCount             `json:"tokens"`
 	ModelTokens      map[string]*ModelUsage `json:"modelTokens"`
 }
@@ -110,21 +111,24 @@ func (f Flow) MarshalJSON() ([]byte, error) {
 }
 
 type Subagent struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	Model     string `json:"model"`
-	Mode      string `json:"mode,omitempty"`
-	StartedAt int64  `json:"startedAt"`
-	LastAt    int64  `json:"lastAt"`
-	EndedAt   int64  `json:"endedAt,omitempty"`
-	Said      string `json:"said"`
-	Running   bool   `json:"running"`
-	Failed    bool   `json:"failed,omitempty"`
-	Doing     string `json:"doing,omitempty"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	Model         string `json:"model"`
+	Mode          string `json:"mode,omitempty"`
+	StartedAt     int64  `json:"startedAt"`
+	LastAt        int64  `json:"lastAt"`
+	EndedAt       int64  `json:"endedAt,omitempty"`
+	Said          string `json:"said"`
+	Running       bool   `json:"running"`
+	Failed        bool   `json:"failed,omitempty"`
+	Doing         string `json:"doing,omitempty"`
+	turnOpen      bool
+	lifecycleOpen bool
 }
 
 type Peer struct {
+	ID   string `json:"id,omitempty"`
 	To   string `json:"to"`
 	At   int64  `json:"at"`
 	Kind string `json:"kind"`
@@ -227,6 +231,7 @@ func (c *Collector) Snapshot() *Snapshot {
 type toolStart struct {
 	Tool
 	carriedAt int64
+	detached  bool
 }
 
 type parseState struct {
@@ -242,6 +247,7 @@ type parseState struct {
 	flows                                  []Flow
 	llm                                    []Flow
 	peers                                  []Peer
+	children                               map[string]sessionRef
 	tokens                                 TokenCount
 	modelTokens                            map[string]*ModelUsage
 	mcpServers                             map[string]bool
@@ -249,7 +255,7 @@ type parseState struct {
 
 func newParseState() *parseState {
 	return &parseState{toolStarts: map[string]*toolStart{}, subs: map[string]*Subagent{}, modelTokens: map[string]*ModelUsage{},
-		mcpServers: map[string]bool{}, perms: newPendingSet(), inputs: newPendingSet()}
+		mcpServers: map[string]bool{}, children: map[string]sessionRef{}, perms: newPendingSet(), inputs: newPendingSet()}
 }
 
 // pendingSet holds open requests (permissions or questions) and their times, in request order.
@@ -308,6 +314,8 @@ func (p *parseState) clearPending(ts int64) {
 	p.perms = newPendingSet()
 	p.inputs = newPendingSet()
 	for _, a := range p.subs {
+		a.turnOpen = false
+		a.lifecycleOpen = false
 		if a.Running {
 			a.Running = false
 			a.EndedAt = ts
@@ -432,9 +440,15 @@ func (p *parseState) apply(e *rawEvent) {
 			p.turnOpen = true
 			p.intent = ""
 		}
+		if sa != nil {
+			sa.turnOpen = true
+		}
 	case "assistant.turn_start":
 		if top {
 			p.turnOpen = true
+		}
+		if sa != nil {
+			sa.turnOpen = true
 		}
 	case "session.start", "session.resume":
 		if top && d.SelectedModel != "" {
@@ -472,11 +486,23 @@ func (p *parseState) apply(e *rawEvent) {
 		if top {
 			p.turnOpen = false
 		}
+		if sa != nil {
+			sa.turnOpen = false
+		}
 	case "session.idle", "session.task_complete", "abort", "session.shutdown":
 		if top {
 			p.turnOpen = false
 			if e.Type != "session.task_complete" {
 				p.clearPending(ts)
+			}
+		}
+		if sa != nil {
+			sa.turnOpen = false
+			sa.lifecycleOpen = false
+			for id, tool := range p.toolStarts {
+				if tool.AgentID == agentID {
+					delete(p.toolStarts, id)
+				}
 			}
 		}
 	case "assistant.message":
@@ -512,12 +538,13 @@ func (p *parseState) apply(e *rawEvent) {
 			ID: d.ToolCallID, Name: d.ToolName, Desc: describeArgs(args), StartedAt: ts, AgentID: agentID,
 			Sink: classifyTool(d.ToolName, args, d.MCPServerName, p.mcpServers),
 		}}
+		p.toolStarts[d.ToolCallID].detached, _ = args["detached"].(bool)
 		if d.ToolName == "report_intent" && top {
 			p.intent = trunc(str(args["intent"]), 80)
 		}
 		if d.ToolName == "send_session_message" {
 			if sid := str(args["session_id"]); sid != "" {
-				p.peers = append(p.peers, Peer{To: sid, At: ts, Kind: "message", Text: trunc(str(args["message"]), 160)})
+				p.peers = append(p.peers, Peer{ID: d.ToolCallID, To: sid, At: ts, Kind: "message", Text: trunc(str(args["message"]), 160)})
 			}
 		}
 	case "tool.execution_complete":
@@ -533,9 +560,10 @@ func (p *parseState) apply(e *rawEvent) {
 			p.flows = append(p.flows, Flow{Sink: t.Sink, Tool: t.Name, Desc: t.Desc, At: t.StartedAt, EndAt: ts,
 				OK: d.Success == nil || *d.Success, AgentID: t.AgentID})
 		}
-		if reSpawnTool.MatchString(t.Name) {
-			if m := reUUID.FindString(string(d.Result)); m != "" {
-				p.peers = append(p.peers, Peer{To: m, At: ts, Kind: "spawn", Text: t.Desc})
+		if reSpawnTool.MatchString(t.Name) && !t.detached && (d.Success == nil || *d.Success) {
+			if ref, created := createdSession(d.Result); ref.id != "" && (t.Name == "create_session" || created) {
+				p.children[ref.id] = ref
+				p.peers = append(p.peers, Peer{To: ref.id, At: ts, Kind: "spawn", Text: t.Desc})
 			}
 		}
 	case "subagent.started":
@@ -554,13 +582,15 @@ func (p *parseState) apply(e *rawEvent) {
 		if _, ok := p.subs[id]; !ok {
 			p.subOrder = append(p.subOrder, id)
 		}
-		p.subs[id] = &Subagent{ID: id, Name: name, Type: typ, Model: d.Model, StartedAt: ts, LastAt: ts, Mode: d.ExecutionMode, Running: true}
+		p.subs[id] = &Subagent{ID: id, Name: name, Type: typ, Model: d.Model, StartedAt: ts, LastAt: ts, Mode: d.ExecutionMode, Running: true, lifecycleOpen: true}
 	case "subagent.completed", "subagent.failed":
 		id := e.AgentID
 		if id == "" {
 			id = d.ToolCallID
 		}
 		if s := p.subs[id]; s != nil {
+			s.turnOpen = false
+			s.lifecycleOpen = false
 			s.Running = false
 			s.EndedAt = ts
 			s.Failed = e.Type == "subagent.failed"
@@ -609,6 +639,19 @@ func (p *parseState) apply(e *rawEvent) {
 		mt.Out += tout
 		mt.Calls++
 	}
+	if sa != nil {
+		running := sa.lifecycleOpen || sa.turnOpen
+		for _, tool := range p.toolStarts {
+			running = running || tool.AgentID == sa.ID
+		}
+		sa.Running = running
+		if running {
+			sa.EndedAt = 0
+			sa.Failed = false
+		} else if sa.EndedAt == 0 {
+			sa.EndedAt = ts
+		}
+	}
 	if len(p.flows) > maxFlows {
 		p.flows = append([]Flow(nil), p.flows[len(p.flows)-maxFlows:]...)
 	}
@@ -627,6 +670,8 @@ func (p *parseState) apply(e *rawEvent) {
 // Only lines that contain a type name or a JSON escape (the type name can be escaped) are parsed.
 var prescanMarks = [][]byte{
 	[]byte("subagent."), []byte("session.start"), []byte("session.resume"), []byte("session.model_change"), []byte(`\u`),
+	[]byte("create_session"), []byte("open_pr_session"), []byte("open_issue_session"), []byte("tool.execution_complete"),
+	[]byte(`"agentId"`), []byte(`"parentToolCallId"`),
 }
 
 func prescanLine(line []byte) bool {
@@ -642,7 +687,7 @@ func prescanType(t string) bool {
 	return t == "session.start" || t == "session.resume" || t == "session.model_change" || strings.HasPrefix(t, "subagent.")
 }
 
-// prescanSubagents applies only the sub-agent lifecycle and model lines in [0, end).
+// prescanSubagents restores lifecycle, resumed turns/tools, model, and creation ownership in [0, end).
 // The initial tail can start after a sub-agent started or after the model was selected.
 // Without this scan, tools in the tail point to an agent ID that has no name, and the
 // session does not show its current model. It returns the end of the last complete line
@@ -674,8 +719,17 @@ func prescanSubagents(file string, p *parseState, end int64) (int64, error) {
 			boundary = pos
 			if prescanLine(line) {
 				var ev rawEvent
-				if json.Unmarshal(line, &ev) == nil && prescanType(ev.Type) {
-					p.apply(&ev)
+				if json.Unmarshal(line, &ev) == nil {
+					t := p.toolStarts[ev.Data.ToolCallID]
+					creation := ev.Type == "tool.execution_start" && reSpawnTool.MatchString(ev.Data.ToolName) ||
+						ev.Type == "tool.execution_complete" && t != nil && reSpawnTool.MatchString(t.Name)
+					agentActivity := (ev.AgentID != "" || ev.Data.ParentToolCallID != "") &&
+						(ev.Type == "user.message" || ev.Type == "assistant.turn_start" || ev.Type == "assistant.turn_end" ||
+							ev.Type == "tool.execution_start" || ev.Type == "tool.execution_complete" ||
+							ev.Type == "session.idle" || ev.Type == "session.task_complete" || ev.Type == "abort" || ev.Type == "session.shutdown")
+					if prescanType(ev.Type) || creation || agentActivity {
+						p.apply(&ev)
+					}
 				}
 			}
 		}
@@ -820,7 +874,7 @@ func (c *Collector) collectCopilotSession(id string, now int64) *Session {
 		if end == 0 {
 			end = a.LastAt
 		}
-		if a.Running || now-end < 5*60e3 {
+		if a.Running || !p.subs[sid].Running || now-end < 5*60e3 {
 			subagents = append(subagents, a)
 		}
 	}
@@ -935,6 +989,7 @@ func (c *Collector) collectCopilotSessions(now int64) []*Session {
 			delete(c.sessions, id)
 		}
 	}
+	resolveSessionRelations(out, c.sessions)
 	return out
 }
 

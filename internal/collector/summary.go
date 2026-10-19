@@ -25,6 +25,7 @@ type summarySession struct {
 	LastActivitySecondsAgo int64                  `json:"lastActivitySecondsAgo"`
 	RunningTools           []string               `json:"runningTools"`
 	Subagents              []summarySub           `json:"subagents"`
+	ChildSessions          []string               `json:"childSessions,omitempty"`
 	BackgroundShells       []BackgroundShell      `json:"backgroundShells,omitempty"`
 	DataFlowsLast2Min      []string               `json:"dataFlowsLast2Min"`
 	ModelTokens            map[string]*ModelUsage `json:"modelTokens"`
@@ -70,6 +71,7 @@ func Summarize(snap *Snapshot, activeOnly bool) summary {
 			LastActivitySecondsAgo: (snap.Now - s.LastEventAt) / 1000, RunningTools: []string{}, Subagents: []summarySub{},
 			DataFlowsLast2Min: []string{}, ModelTokens: s.ModelTokens}
 		ss.BackgroundShells = s.BackgroundShells
+		ss.ChildSessions = s.ChildSessions
 		// Only tool names. Command arguments can contain credentials, so they stay in the local UI.
 		for _, t := range s.RunningTools {
 			ss.RunningTools = append(ss.RunningTools, t.Name)

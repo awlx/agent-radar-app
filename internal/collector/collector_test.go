@@ -1026,7 +1026,7 @@ func TestPrescanParsedType(t *testing.T) {
 	if _, err := prescanSubagents(f, p, int64(len(lines))); err != nil {
 		t.Fatal(err)
 	}
-	if p.subs["c1"] == nil || p.subs["c2"] == nil || len(p.toolStarts) != 0 || p.model != "m2" {
+	if p.subs["c1"] == nil || p.subs["c2"] == nil || len(p.toolStarts) != 1 || p.toolStarts["t1"].AgentID != "c1" || p.model != "m2" {
 		t.Fatalf("subs = %#v tools = %#v model = %q", p.subs, p.toolStarts, p.model)
 	}
 }

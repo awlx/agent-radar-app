@@ -84,6 +84,8 @@ These operating systems are supported:
 
 - A map of the agents. The map shows the surface, the sessions, the sub-agents, and the data destinations.
 - Sub-agents use diamond markers and sit beneath their parent in a bordered group, with their status and current task below the name. Narrow windows scroll the map instead of squeezing its labels. Select a marker for full details in the side panel.
+- Created child sessions stay nested beneath their creator with solid ownership links, even when the creation is old. Available idle ancestors remain visible as "Idle parent context" while a descendant works. Each newly observed session message travels once as a dot along the existing ownership path; no extra message line or history replay is drawn. Reduced motion uses a brief stationary indication at the receiver. Message details remain in the feed. Child sessions keep circular markers, sub-agents use diamonds, and detached background shells use squares.
+- Background sub-agents can resume after their first completed task. The map follows their later turns and tool activity under the same identity. Turn on "show idle / completed" to see all recorded completed sub-agents of the collected sessions, not just recent completions.
 - Detached background shells use square markers beneath their owning session, with a separate count and process details. They remain visible when the agent is idle or disconnected and are not counted as working agents or sub-agents.
 - A live feed of the data flows, with the tool and the command of each flow.
 - The model tokens for each model. This includes models that you configure with your own key (BYOK).

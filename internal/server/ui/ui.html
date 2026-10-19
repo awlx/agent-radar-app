@@ -15,7 +15,7 @@
     display: grid; grid-template-columns: 1fr 340px; grid-template-rows: auto minmax(0, 1fr) var(--feedH, 36vh); height: 100vh;
   }
   header {
-    grid-column: 1 / 3; display: flex; align-items: center; gap: 14px; padding: 8px 12px;
+    grid-column: 1 / 3; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 12px;
     border-bottom: 1px solid var(--border-color-default, #30363d);
   }
   header h1 { font-size: 14px; margin: 0; font-weight: var(--font-weight-semibold, 600); letter-spacing: .02em; }
@@ -27,6 +27,8 @@
   @keyframes blink { 50% { opacity: .35; } }
   #stage { position: relative; min-width: 0; min-height: 0; overflow: auto; }
   canvas { width: 100%; display: block; }
+  #graphHint { position: sticky; top: 32px; left: 8px; z-index: 2; width: fit-content; height: 26px; box-sizing: border-box; margin: 0 8px -26px; padding: 5px 8px;
+    border: 1px solid var(--border-color-default, #30363d); border-radius: 6px; background: var(--background-color-default, #0d1117); color: var(--text-color-muted, #8b949e); font-size: 11px; pointer-events: none; }
   #legend { position: sticky; bottom: 0; margin-top: -28px; padding: 6px 10px; display: flex; flex-wrap: wrap; gap: 10px; color: var(--text-color-muted, #8b949e); pointer-events: none;
     background: color-mix(in srgb, var(--background-color-default, #0d1117) 85%, transparent); }
   #legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; background: var(--c); }
@@ -110,13 +112,14 @@
   <span class="stat" id="conn" role="status" aria-live="polite">connecting…</span>
   <span class="stat"><b id="sBusy">0</b> working</span>
   <span class="stat"><b id="sWait">0</b> waiting on you</span>
-  <span class="stat"><b id="sSub">0</b> sub-agents</span>
+  <span class="stat"><b id="sSub">0</b> running sub-agents<span id="subHistory"></span></span>
   <span class="stat"><b id="sShell">0</b> background shells</span>
   <span class="stat"><b id="sAll">0</b> sessions</span>
   <span class="stat"><b id="sFlow">0</b> flows / 2 min</span>
-  <label><input type="checkbox" id="showIdle" /> show idle</label>
+  <label><input type="checkbox" id="showIdle" /> show idle / completed</label>
 </header>
 <div id="stage">
+  <div id="graphHint" hidden>↔ Scroll to explore the full graph</div>
   <canvas id="cv" aria-hidden="true"></canvas>
   <div id="tip"></div>
   <div id="legend"></div>
@@ -161,7 +164,7 @@ function updateTheme() {
   if (next === P && document.getElementById("legend").innerHTML) return false;
   P = next;
   for (const k of ["ok", "warn", "bad"]) document.body.style.setProperty("--" + k, P[k]);
-  document.getElementById("legend").innerHTML = `<span class="subagent" style="--c:${P.other}">sub-agent (under parent)</span><span class="shell" style="--c:${P.other}">background shell (under owner)</span>` + [["Copilot app", P.app], ["VS Code agent", P.vscode], ["VS Code chat", P.chat], ["LLM", P.llm], ["data sink ▢", P.other], ["session ↔ session", P.cli]]
+  document.getElementById("legend").innerHTML = `<span class="subagent" style="--c:${P.other}">sub-agent (diamond)</span><span class="shell" style="--c:${P.other}">background shell (square)</span>` + [["child session (solid link)", P.other], ["message (one-shot dot)", P.cli], ["Copilot app", P.app], ["VS Code agent", P.vscode], ["VS Code chat", P.chat], ["LLM", P.llm], ["data sink ▢", P.other]]
     .map(([n, c]) => `<span style="--c:${c}">${n}</span>`).join("");
   return true;
 }
@@ -180,10 +183,11 @@ const ago = (t) => { if (!t) return ""; const s = Math.max(0, (Date.now() - t) /
 const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
 const tip = document.getElementById("tip"), stage = document.getElementById("stage");
 // Scroll rather than compress the hierarchy or let adjacent labels overlap.
-let W = 0, H = 0, DPR = 1, contentH = 0;
+let W = 0, H = 0, DPR = 1, contentH = 0, contentW = 900;
 function resize() {
   DPR = window.devicePixelRatio || 1;
-  const w = Math.max(900, stage.clientWidth), h = Math.max(stage.clientHeight, contentH);
+  const w = Math.max(contentW, stage.clientWidth), h = Math.max(stage.clientHeight, contentH);
+  document.getElementById("graphHint").hidden = w <= stage.clientWidth;
   if (w === W && h === H && cv.width === Math.round(w * DPR)) return;
   W = w; H = h; cv.style.width = W + "px"; cv.style.height = H + "px"; cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
 }
@@ -192,6 +196,8 @@ resize();
 // ---------- Layout model (fixed columns, stable rows) ----------
 const nodes = new Map();
 let links = [], particles = [], snapshot = null, selected = null, hover = null;
+let messagePulses = [], messageFloor = null;
+const seenMessages = new Map();
 // Only destinations that keep the data on this computer. Shell, build, and container commands can
 // send data to remote systems (kubectl apply, docker push, npm publish), so they are tools & services.
 const LOCAL_SINKS = new Set(["Filesystem", "Session DB", "You", "Memory (local)"]);
@@ -221,8 +227,36 @@ function build(snap) {
   links = [];
   const L = (a, b, o = {}) => links.push({ a, b, ...o });
 
-  const sessions = snap.sessions.filter((s) => showIdle || s.busy || s.waiting || s.backgroundShells?.length)
-    .map((s) => showIdle ? s : { ...s, subagents: s.subagents.filter((a) => a.running) });
+  const all = new Map(snap.sessions.map((s) => [s.id, s])), parentOf = new Map();
+  for (const s of [...snap.sessions].sort((a, b) => a.id.localeCompare(b.id))) for (const id of s.childSessions || []) {
+    if (!all.has(id) || id === s.id || parentOf.has(id)) continue;
+    let ancestor = s.id;
+    while (ancestor && ancestor !== id) ancestor = parentOf.get(ancestor);
+    if (ancestor !== id) parentOf.set(id, s.id);
+  }
+  const active = (s) => s.busy || s.waiting || s.backgroundShells?.length || s.subagents.some((a) => a.running);
+  const visible = new Set(snap.sessions.filter((s) => showIdle || active(s)).map((s) => s.id));
+  for (const id of visible) {
+    const parent = parentOf.get(id);
+    if (parent) visible.add(parent);
+  }
+  const sessions = snap.sessions.filter((s) => visible.has(s.id))
+    .map((s) => ({ ...s, contextOnly: !showIdle && !active(s), subagents: showIdle ? s.subagents : s.subagents.filter((a) => a.running) }));
+  const byID = new Map(sessions.map((s) => [s.id, s]));
+  const childrenOf = new Map(sessions.map((s) => [s.id, []]));
+  for (const s of sessions) if (byID.has(parentOf.get(s.id))) childrenOf.get(parentOf.get(s.id)).push(s);
+  for (const children of childrenOf.values()) children.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  const roots = sessions.filter((s) => !byID.has(parentOf.get(s.id)));
+  const ownRows = (s) => 1 + s.subagents.length + (s.backgroundShells?.length || 0);
+  const treeSlots = new Map();
+  const measureTree = (s, depth = 0) => {
+    s.depth = depth;
+    const slots = ownRows(s) + .4 + childrenOf.get(s.id).reduce((n, child) => n + measureTree(child, depth + 1), 0);
+    treeSlots.set(s.id, slots);
+    return slots;
+  };
+  for (const s of roots) measureTree(s);
+  contentW = 900 + Math.max(0, ...sessions.map((s) => s.depth)) * 80;
 
   // Assign each session to a hub (surface, or the VS Code window it lives in).
   const normPath = (p) => { let n = String(p || "").replace(/\\/g, "/").replace(/\/+$/, ""); return /^[A-Za-z]:(\/|$)/.test(n) ? n.toLowerCase() : n; };
@@ -238,13 +272,20 @@ function build(snap) {
     return { id: "hub:" + s.surface, label: s.surface, color: surfaceColor(s.surface), order: o < 0 ? 3 : o };
   };
   const groups = new Map();
-  for (const s of sessions) {
+  for (const s of roots) {
     const h = hubOf(s);
     if (!groups.has(h.id)) groups.set(h.id, { hub: h, sessions: [] });
     groups.get(h.id).sessions.push(s);
   }
   const hubList = [...groups.values()].sort((a, b) => a.hub.order - b.hub.order || a.hub.label.localeCompare(b.hub.label));
-  for (const g of hubList) g.sessions.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  for (const g of hubList) {
+    g.sessions.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    const ordered = [];
+    const visit = (s) => { ordered.push(s); childrenOf.get(s.id).forEach(visit); };
+    g.sessions.forEach(visit);
+    g.sessions = ordered;
+  }
+  sessions.splice(0, sessions.length, ...hubList.flatMap((g) => g.sessions));
 
   // Data edges per session, collected first so sinks can be laid out.
   const sinkSet = new Map(); const edges = [];
@@ -263,7 +304,7 @@ function build(snap) {
 
   // Vertical slots.
   let sessSlots = 0;
-  for (const g of hubList) { for (const s of g.sessions) sessSlots += 1 + s.subagents.length + (s.backgroundShells?.length || 0) + .4; sessSlots += .8; }
+  for (const g of hubList) { for (const s of g.sessions) sessSlots += ownRows(s) + .4; sessSlots += .8; }
   let sinkSlots = sinks.length + new Set(sinks.map(sinkGroup)).size * .9;
   const top = 46, bottom = 54, MIN_SLOT = 52;
   contentH = top + bottom + Math.max(sessSlots * MIN_SLOT, sinkSlots * 28, MIN_SLOT);
@@ -271,7 +312,7 @@ function build(snap) {
   const usable = H - top - bottom;
   const slot = Math.max(MIN_SLOT, Math.min(64, usable / Math.max(sessSlots, 1)));
   const sinkSlot = Math.max(28, Math.min(44, usable / Math.max(sinkSlots, 1)));
-  const X = { you: 36, hub: W * .13, sess: W * .28, agent: W * .28 + 28, sink: W - 30 };
+  const X = { you: 36, hub: W * .13, sess: W * .28, sink: W - 30 };
   const familyRight = W * .65;
   headers = [["SURFACE", X.hub], ["SESSIONS & CHILD ACTIVITY", X.sess - 18, "left"], ["DATA DESTINATIONS", X.sink, "right"]];
 
@@ -280,23 +321,25 @@ function build(snap) {
   for (const g of hubList) {
     const ys = [];
     for (const s of g.sessions) {
-      const rows = 1 + s.subagents.length + (s.backgroundShells?.length || 0);
+      const rows = ownRows(s) + childrenOf.get(s.id).reduce((n, child) => n + treeSlots.get(child.id), 0);
       const sy = y;
       const sid = "s:" + s.id, color = surfaceColor(s.surface);
-      upsert(sid, { type: "session", label: s.name, color, s, tx: X.sess, ty: sy, r: 7, rows, slot, familyRight, labelWidth: familyRight - X.sess - 30 });
-      ys.push(sy);
-      L(g.hub.id, sid, { color, kind: "own", active: s.busy });
+      const sx = X.sess + s.depth * 28, ax = sx + 28;
+      const parentSessionID = byID.has(parentOf.get(s.id)) ? "s:" + parentOf.get(s.id) : null;
+      upsert(sid, { type: "session", label: s.name, color, s, parentSessionID, tx: sx, ty: sy, r: 7, rows, slot, familyRight, labelWidth: familyRight - sx - 30 });
+      if (!parentSessionID) ys.push(sy);
+      L(parentSessionID || g.hub.id, sid, { color, kind: parentSessionID ? "child" : "own", active: s.busy });
       s.subagents.forEach((a, i) => {
         const aid = "a:" + s.id + ":" + a.id;
-        upsert(aid, { type: "agent", label: a.name, color, a, parent: s, tx: X.agent, ty: y + (i + 1) * slot, r: 7, labelWidth: familyRight - X.agent - 30 });
+        upsert(aid, { type: "agent", label: a.name, color, a, parent: s, tx: ax, ty: y + (i + 1) * slot, r: 7, labelWidth: familyRight - ax - 30 });
         L(sid, aid, { color, kind: "sub", active: a.running });
       });
       (s.backgroundShells || []).forEach((b, i) => {
         const bid = "b:" + s.id + ":" + b.id;
-        upsert(bid, { type: "shell", label: b.id, color, b, parent: s, tx: X.agent, ty: y + (s.subagents.length + i + 1) * slot, r: 7, labelWidth: familyRight - X.agent - 30 });
+        upsert(bid, { type: "shell", label: b.id, color, b, parent: s, tx: ax, ty: y + (s.subagents.length + i + 1) * slot, r: 7, labelWidth: familyRight - ax - 30 });
         L(sid, bid, { color, kind: "background", active: true });
       });
-      y += (rows + .4) * slot;
+      y += (ownRows(s) + .4) * slot;
     }
     const hy = ys.reduce((a, b) => a + b, 0) / ys.length;
     upsert(g.hub.id, { type: "hub", label: g.hub.label, color: g.hub.color, detail: g.hub.detail, tx: X.hub, ty: hy, r: 10 });
@@ -318,16 +361,9 @@ function build(snap) {
     const fresh = Math.max(0, 1 - (now - e.at) / 120e3);
     L(e.src, "k:" + e.sink, { color: sinkColor(e.sink), kind: "flow", active: e.live, heat: e.live ? 1 : fresh, w: e.w });
   }
-  const ids = new Set(sessions.map((s) => "s:" + s.id));
-  for (const s of sessions) for (const p of s.peers) {
-    const pid = "s:" + p.to;
-    if (!ids.has(pid) || pid === "s:" + s.id) continue;
-    const fresh = Math.max(0, 1 - (now - p.at) / 300e3);
-    L("s:" + s.id, pid, { color: p.kind === "spawn" ? P.app : P.cli, kind: "peer", dashed: p.kind === "spawn", heat: fresh, active: fresh > .6 });
-  }
-
   for (const [id, n] of nodes) if (!n.seen) nodes.delete(id);
   links = links.filter((l) => nodes.has(l.a) && nodes.has(l.b));
+  observeMessages(snap);
   if (selected && !nodes.has(selected.id)) selected = null;
   if (hover && !nodes.has(hover.id)) { hover = null; tip.style.display = "none"; cv.style.cursor = "default"; }
   renderSidebar(snap, sessions);
@@ -337,7 +373,7 @@ new ResizeObserver(() => { resize(); build(snapshot); }).observe(stage);
 // ---------- Geometry ----------
 function curve(l) {
   const a = nodes.get(l.a), b = nodes.get(l.b);
-  if (l.kind === "sub" || l.kind === "background") return [a.x, a.y + a.r, a.x, b.y, a.x, b.y, b.x - b.r, b.y];
+  if (l.kind === "sub" || l.kind === "background" || l.kind === "child") return [a.x, a.y + a.r, a.x, b.y, a.x, b.y, b.x - b.r, b.y];
   if (l.kind === "peer") { const off = 40 + Math.abs(b.y - a.y) * .25; return [a.x, a.y, a.x - off, a.y, b.x - off, b.y, b.x, b.y]; }
   const dx = (b.x - a.x) * .5;
   return [a.x, a.y, a.x + dx, a.y, b.x - dx, b.y, b.x, b.y];
@@ -347,13 +383,61 @@ function bez(c, u) {
   return [v*v*v*c[0] + 3*v*v*u*c[2] + 3*v*u*u*c[4] + u*u*u*c[6], v*v*v*c[1] + 3*v*v*u*c[3] + 3*v*u*u*c[5] + u*u*u*c[7]];
 }
 
+function observeMessages(snap) {
+  const current = new Set(), started = performance.now();
+  for (const s of snap.sessions) for (const p of s.peers) {
+    if (p.kind !== "message") continue;
+    const id = JSON.stringify([s.id, p.id || [p.to, p.at, p.text]]);
+    current.add(id);
+    const a = "s:" + s.id, b = "s:" + p.to;
+    if (messageFloor !== null && !seenMessages.has(id) && p.at > messageFloor && snap.now - p.at < 10000 &&
+        a !== b && nodes.has(a) && nodes.has(b)) {
+      messagePulses.push({ a, b, started });
+    }
+    seenMessages.set(id, p.at);
+  }
+  for (const [id, at] of seenMessages) if (!current.has(id) && snap.now - at >= 10000) seenMessages.delete(id);
+  messageFloor = Math.max(messageFloor ?? snap.now, snap.now - 10000);
+}
+
+function messagePoint(p, progress) {
+  const ownership = links.filter((l) => l.kind === "child");
+  const pending = [{ id: p.a, path: [] }], visited = new Set([p.a]);
+  while (pending.length) {
+    const { id, path } = pending.shift();
+    if (id === p.b && path.length) {
+      const position = Math.min(progress, 1) * path.length;
+      const segment = path[Math.min(Math.floor(position), path.length - 1)];
+      const u = Math.min(1, position - Math.min(Math.floor(position), path.length - 1));
+      return bez(curve(segment.link), segment.reverse ? 1 - u : u);
+    }
+    for (const link of ownership) {
+      const next = link.a === id ? link.b : link.b === id ? link.a : null;
+      if (next && !visited.has(next)) {
+        visited.add(next); pending.push({ id: next, path: [...path, { link, reverse: link.b === id }] });
+      }
+    }
+  }
+  // Unrelated sessions get only a transient dot, never a fabricated ownership edge.
+  return bez(curve({ a: p.a, b: p.b, kind: "peer" }), progress);
+}
+
+function drawMessages(t) {
+  messagePulses = messagePulses.filter((p) => t - p.started < 1200 && nodes.has(p.a) && nodes.has(p.b));
+  for (const p of messagePulses) {
+    const target = nodes.get(p.b);
+    const [x, y] = reduceMotion ? [target.x, target.y - target.r - 7] : messagePoint(p, Math.max(0, (t - p.started) / 1200));
+    ctx.globalAlpha = 1; ctx.fillStyle = P.cli; ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
 // ---------- Particles (throttled per link) ----------
 function spawnParticles(t) {
   if (reduceMotion) return;
   for (const l of links) {
     const heat = l.active ? 1 : (l.heat || 0);
     if (heat < .05) continue;
-    if ((l.kind === "hub" || l.kind === "own" || l.kind === "sub") && !l.active) continue;
+    if ((l.kind === "hub" || l.kind === "own" || l.kind === "sub" || l.kind === "child") && !l.active) continue;
     const interval = l.kind === "flow" ? 700 / heat : l.kind === "peer" ? 1200 / heat : 1800;
     if (t < (l.nextAt || 0)) continue;
     l.nextAt = t + interval * (.7 + Math.random() * .6);
@@ -380,6 +464,25 @@ function label(text, x, y, align, font, color, max, maxWidth = Infinity) {
 function diamond(x, y, r) {
   ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath();
 }
+function focusedNodes(focus) {
+  const related = new Set();
+  if (!focus) return related;
+  related.add(focus.id);
+  // Walk down only from the selected node, not from ancestors reached on the way up.
+  for (const direction of ["up", "down"]) {
+    if (direction === "down" && focus.type === "sink") continue;
+    const pending = [focus.id], visited = new Set(pending);
+    while (pending.length) {
+      const id = pending.pop();
+      for (const l of links) {
+        if (l.kind === "peer") continue;
+        const next = direction === "up" ? (l.b === id ? l.a : null) : (l.a === id ? l.b : null);
+        if (next && !visited.has(next)) { visited.add(next); related.add(next); pending.push(next); }
+      }
+    }
+  }
+  return related;
+}
 function draw(t) {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.clearRect(0, 0, W, H);
@@ -400,31 +503,14 @@ function draw(t) {
   }
   ctx.globalAlpha = 1;
 
-  const focus = selected || hover, related = new Set();
-  if (focus) {
-    related.add(focus.id);
-    // Follow the chain both ways: you→hub→session→agent→sink. From a destination, follow
-    // only the upward chain, so that we see all the agents that send data to it.
-    // You and hubs go down only when they were reached downward (or are selected), so that
-    // the ancestors of a selected session do not show its sibling sessions.
-    const fromSink = focus.type === "sink", below = new Set([focus.id]);
-    const top = (id) => { const t = nodes.get(id).type; return t === "you" || t === "hub"; };
-    let changed = true;
-    while (changed) { changed = false; for (const l of links) {
-      if (l.kind === "peer") continue;
-      const down = !fromSink && related.has(l.a) && !related.has(l.b) && (below.has(l.a) || !top(l.a));
-      const up = related.has(l.b) && !related.has(l.a) && (fromSink || nodes.get(l.b).type !== "sink");
-      if (down) below.add(l.b);
-      if (down || up) { related.add(l.a); related.add(l.b); changed = true; }
-    } }
-  }
+  const focus = selected || hover, related = focusedNodes(focus);
   const inFocus = (l) => !focus || (related.has(l.a) && related.has(l.b));
 
   for (const l of links) {
     const c = l._c = curve(l);
     const heat = l.active ? 1 : (l.heat ?? .3);
-    ctx.globalAlpha = !inFocus(l) ? .04 : l.kind === "flow" ? .10 + heat * .45 : l.kind === "peer" ? .2 + heat * .6 : l.kind === "sub" ? .7 : .35;
-    ctx.strokeStyle = l.color; ctx.lineWidth = l.kind === "flow" ? 1 + Math.min(2.5, (l.w || 1) * .35) : l.kind === "sub" ? 2 : 1.3;
+    ctx.globalAlpha = !inFocus(l) ? .04 : l.kind === "flow" ? .10 + heat * .45 : l.kind === "peer" ? .2 + heat * .6 : l.kind === "sub" || l.kind === "child" ? .7 : .35;
+    ctx.strokeStyle = l.color; ctx.lineWidth = l.kind === "flow" ? 1 + Math.min(2.5, (l.w || 1) * .35) : l.kind === "sub" || l.kind === "child" ? 2 : 1.3;
     ctx.setLineDash(l.dashed ? [4, 4] : []);
     ctx.beginPath(); ctx.moveTo(c[0], c[1]); ctx.bezierCurveTo(c[2], c[3], c[4], c[5], c[6], c[7]); ctx.stroke();
   }
@@ -480,10 +566,12 @@ function draw(t) {
     if (n.type === "you") label("You", x, y + r + 12, "center", `600 11px ${sans}`, text, 10);
     else if (n.type === "hub") label(n.label, x, y - r - 9, "center", `600 11px ${sans}`, text, 28, W * .22 - 20);
     else if (n.type === "session") {
-      label(n.label, x + r + 8, y - 6, "left", `600 12px ${sans}`, text, 100, n.labelWidth);
+      label(n.label, x + r + 8, y - 15, "left", `600 12px ${sans}`, text, 100, n.labelWidth);
       const s = n.s, tl = s.runningTools[0];
-      const doing = s.waiting ? "⏳ waiting for you" : tl ? `▸ ${tl.name}${tl.desc ? ": " + tl.desc : ""}` : !s.busy ? "○ idle" : s.intent ? "▸ " + s.intent : "▸ thinking";
-      label(doing, x + r + 8, y + 9, "left", `10px ${mono}`, s.waiting ? P.warn : muted, 100, n.labelWidth);
+      const role = s.contextOnly ? "Idle parent context" : n.parentSessionID ? "Child session" : "Session";
+      label(role + " · " + s.surface, x + r + 8, y, "left", `11px ${sans}`, muted, 100, n.labelWidth);
+      const doing = s.waiting ? "⏳ waiting for you" : tl ? `▸ ${tl.name}${tl.desc ? ": " + tl.desc : ""}` : s.contextOnly ? "Kept for active descendants" : !s.busy ? "○ idle" : s.intent ? "▸ " + s.intent : "▸ thinking";
+      label(doing, x + r + 8, y + 15, "left", `10px ${mono}`, s.waiting ? P.warn : muted, 100, n.labelWidth);
     } else if (n.type === "agent") {
       label(n.label, x + r + 7, y - 15, "left", `600 12px ${sans}`, n.a.running ? text : muted, 100, n.labelWidth);
       label((n.a.running ? "Running" : "Done") + (n.a.model ? " · " + n.a.model : ""), x + r + 7, y, "left", `11px ${sans}`, n.a.running ? P.ok : muted, 100, n.labelWidth);
@@ -495,6 +583,7 @@ function draw(t) {
     } else if (n.type === "sink") label(n.label, x - r - 8, y, "right", `500 11px ${sans}`, text, 100, W * .30 - 30);
   }
   ctx.globalAlpha = 1;
+  drawMessages(t);
 }
 
 function frame(t) { spawnParticles(t); draw(t); requestAnimationFrame(frame); }
@@ -517,6 +606,8 @@ function nodeInfo(n, full) {
   let h = full ? "" : `<div class="t">${esc(n.label)}</div>`;
   if (n.type === "session") {
     const s = n.s;
+    if (n.parentSessionID) h += `<div class="m">Child session of ${esc(nodes.get(n.parentSessionID)?.label)}</div>`;
+    if (s.contextOnly) h += `<div class="m">Idle parent shown as context for active descendants.</div>`;
     h += `<div class="m">${esc(s.surface)} · ${esc(full ? s.cwd || s.repo : s.repo || s.cwd)} ${s.model ? "· " + esc(s.model) : ""} · ${ago(s.lastEventAt)} ago</div>`;
     if (s.lastUser) h += `<div style="margin-top:4px">💬 ${esc(s.lastUser)}</div>`;
     for (const t of full ? s.runningTools : s.runningTools.slice(0, 4)) h += `<div>⚙️ <b>${esc(t.name)}</b> ${esc(t.desc)}</div>`;
@@ -613,12 +704,15 @@ function detailsHTML(sid) {
 }
 function renderSidebar(snap, sessions, force) {
   sidebarArgs = [snap, sessions];
+  const allById = new Map(snap.sessions.map((s) => [s.id, s]));
   const busy = sessions.filter((s) => s.busy).length, wait = sessions.filter((s) => s.waiting).length;
   const subs = sessions.reduce((n, s) => n + s.subagents.filter((a) => a.running).length, 0);
   const flows = sessions.reduce((n, s) => n + s.flows.length, 0);
   document.getElementById("sBusy").textContent = busy;
   document.getElementById("sWait").textContent = wait;
   document.getElementById("sSub").textContent = subs;
+  const inactive = sessions.reduce((n, s) => n + allById.get(s.id).subagents.length, 0) - subs;
+  document.getElementById("subHistory").textContent = inactive ? ` · ${inactive} inactive${document.getElementById("showIdle").checked ? "" : " hidden"}` : "";
   document.getElementById("sShell").textContent = sessions.reduce((n, s) => n + (s.backgroundShells?.length || 0), 0);
   document.getElementById("sAll").textContent = sessions.length;
   document.getElementById("sFlow").textContent = flows;
@@ -666,7 +760,7 @@ function renderSidebar(snap, sessions, force) {
     for (const el of list.querySelectorAll(".details details")) el.ontoggle = () => { if (el.open) openSubs.add(el.dataset.sub); else openSubs.delete(el.dataset.sub); };
   }, force);
 
-  const evs = [], allById = new Map(snap.sessions.map((x) => [x.id, x]));
+  const evs = [];
   for (const s of sessions) {
     for (const f of s.flows) if (f.tool !== "model") evs.push({ at: f.endAt || f.at, s, f });
     for (const t of s.runningTools) if (t.sink) evs.push({ at: Date.now(), s, f: { ...t, tool: t.name, live: true } });
@@ -797,7 +891,7 @@ function demoSnapshot() {
   const sess = (o) => ({ kind: "copilot", live: true, busy: true, waiting: false, lastEventAt: s(2), lastUser: "", lastAssistant: "", intent: "",
     runningTools: [], subagents: [], flows: [], peers: [], tokens: { in: 0, out: 0 }, modelTokens: {}, ...o });
   const sessions = [
-    sess({ id: "demo-0001", surface: "Copilot app", name: "Add retry with backoff to the payments client", cwd: "/home/dev/src/acme-shop", repo: "acme-shop", model: "claude-sonnet-4.5", intent: "Running tests",
+    sess({ id: "demo-0001", surface: "Copilot app", name: "Add retry with backoff to the payments client", cwd: "/home/dev/src/acme-shop", repo: "acme-shop", model: "claude-sonnet-4.5", intent: "Running tests", childSessions: ["demo-0003"],
       runningTools: [{ id: "t1", name: "bash", desc: "$ go test ./payments/...", startedAt: s(6), sink: "Build / run" }],
       subagents: [{ id: "sa1", name: "find-call-sites", type: "explore", model: "claude-haiku-4.5", startedAt: s(40), lastAt: s(3), running: true, doing: "grep: NewClient( in ./" },
         { id: "sa0", name: "read-retry-docs", type: "explore", model: "claude-haiku-4.5", startedAt: s(90), lastAt: s(60), endedAt: s(60), running: false, said: "The retry policy is in docs/payments.md: 3 tries, 200 ms base delay." }],
@@ -812,6 +906,7 @@ function demoSnapshot() {
       flows: [fl("MCP: github-mcp-server", "github-mcp-server-list_pull_requests", "repo: acme/acme-shop  state: merged", 40), llm("GPT-5", 22000, 1800, 30)],
       modelTokens: { "GPT-5": { in: 340000, out: 22000, calls: 14 } } }),
     sess({ id: "demo-0003", surface: "VS Code agent", name: "Fix flaky login e2e test", cwd: "/home/dev/src/web-portal", repo: "web-portal", model: "claude-sonnet-4.5", intent: "Reproducing in browser",
+      subagents: [{ id: "login-review", name: "login-review", type: "code-review", model: "Demo model", startedAt: s(20), lastAt: s(2), running: true, doing: "Checking the fabricated login test" }],
       runningTools: [{ id: "t3", name: "playwright-browser_navigate", desc: "http://localhost:3000/login", startedAt: s(3), sink: "MCP: playwright" }],
       flows: [fl("MCP: playwright", "playwright-browser_click", "Sign in button", 7), fl("Build / run", "bash", "$ npm run test:e2e -- login.spec.ts", 18), fl("Filesystem", "view", "/home/dev/src/web-portal/tests/login.spec.ts", 24),
         llm("Claude Sonnet 4.5", 36500, 700, 6)],

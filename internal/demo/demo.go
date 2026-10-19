@@ -69,7 +69,7 @@ func (*Source) Snapshot() *collector.Snapshot {
 			{sink: "Filesystem", tool: "grep", desc: "func .*Handler", agent: "a1", every: 6000, offset: 3000},
 			{sink: "LLM: " + gpt, tool: "model", desc: gpt, agent: "a2", model: gpt, every: 8000, offset: 2500, tokens: 30_000},
 		}),
-		Peers:       []collector.Peer{{To: "a1", At: ago(40), Kind: "spawn", Text: "Find all HTTP handlers"}, {To: "a2", At: ago(15), Kind: "spawn", Text: "Review the change"}},
+		Peers:       []collector.Peer{},
 		Tokens:      collector.TokenCount{In: 1_840_000, Out: 61_000},
 		ModelTokens: usage(sonnet, 1_840_000, 61_000, 74),
 	}
@@ -118,7 +118,9 @@ func (*Source) Snapshot() *collector.Snapshot {
 		LastAssistant: "I read the change log. Now I get the current examples from the docs server.",
 		Intent:        "Fetching the API examples",
 		RunningTools:  []collector.Tool{{ID: "t4", Name: "docs-search", Desc: "rate limit headers", StartedAt: ago(2), Sink: "MCP: docs"}},
-		Subagents:     []collector.Subagent{},
+		Subagents: []collector.Subagent{
+			{ID: "docs-review", Name: "docs-review", Type: "code-review", Model: haiku, StartedAt: ago(20), LastAt: ago(2), Doing: "Checking API examples", Running: true},
+		},
 		Flows: recent(now, []flowSpec{
 			{sink: "LLM: " + sonnet, tool: "model", desc: sonnet, model: sonnet, every: 10000, offset: 3000, tokens: 35_000},
 			{sink: "MCP: docs", tool: "docs-search", desc: "rate limit headers", every: 8000, offset: 5000},
@@ -137,6 +139,8 @@ func (*Source) Snapshot() *collector.Snapshot {
 		Tokens: collector.TokenCount{In: 90_000, Out: 4_000}, ModelTokens: usage(sonnet, 90_000, 4_000, 6),
 	}
 
+	app.ChildSessions = []string{agent.ID}
+	app.Peers = []collector.Peer{{To: agent.ID, At: ago(1800), Kind: "spawn", Text: "Update the API reference"}}
 	return &collector.Snapshot{
 		Now:      now,
 		Sessions: []*collector.Session{app, cli, chat, agent, idle},

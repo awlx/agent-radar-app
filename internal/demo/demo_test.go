@@ -20,4 +20,14 @@ func TestSnapshot(t *testing.T) {
 	if working == 0 || waiting == 0 {
 		t.Fatalf("working=%d waiting=%d", working, waiting)
 	}
+	for _, parent := range snap.Sessions {
+		for _, id := range parent.ChildSessions {
+			for _, child := range snap.Sessions {
+				if child.ID == id && len(child.Subagents) > 0 {
+					return
+				}
+			}
+		}
+	}
+	t.Fatal("demo must include a parent -> child session -> subagent chain")
 }
