@@ -84,6 +84,7 @@ These operating systems are supported:
 
 - A map of the agents. The map shows the surface, the sessions, the sub-agents, and the data destinations.
 - Sub-agents use diamond markers and sit beneath their parent in a bordered group, with their status and current task below the name. Narrow windows scroll the map instead of squeezing its labels. Select a marker for full details in the side panel.
+- Detached background shells use square markers beneath their owning session, with a separate count and process details. They remain visible when the agent is idle or disconnected and are not counted as working agents or sub-agents.
 - A live feed of the data flows, with the tool and the command of each flow.
 - The model tokens for each model. This includes models that you configure with your own key (BYOK).
 - A side panel with the prompt, the folder, the model, and the sub-agents of the selected session.
@@ -99,6 +100,11 @@ Shell, build, and container commands are in this group, because they can send da
 The name of an MCP destination is the name of the MCP server.
 If the radar cannot find the server name, the destination is "MCP: unknown server".
 If the operating system is set to reduce motion, the UI does not show animations.
+
+Background shells are discovered from `session-state/*/detached-shells/*.json` in the Copilot home directory.
+Radar checks the supervisor process, not the age of its owner's heartbeat; on Linux it also verifies the boot ID and process start time to reject stale records and reused PIDs.
+Only detached shells with this metadata are shown. An ordinary asynchronous shell without persistent process metadata cannot be reliably rediscovered after its tool call returns.
+The JSON summary includes background shell IDs, PIDs, and start times, never their command lines or logs. A session with only background shells retains its agent's `idle` status.
 
 ## Use the app
 

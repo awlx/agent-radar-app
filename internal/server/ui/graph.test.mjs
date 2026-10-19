@@ -5,8 +5,9 @@ import vm from "node:vm";
 
 const html = readFileSync(new URL("./ui.html", import.meta.url), "utf8");
 const source = html.split("<script>")[1].split("// ---------- Panels ----------")[0];
+const panelSource = html.split("<script>")[1].split("// Feed resize grip")[0];
 
-function graph(width = 1000, height = 500) {
+function graph(width = 1000, height = 500, panels = false) {
   const labels = [], paths = [];
   const ctx = new Proxy({
     measureText: (text) => ({ width: text.length * 8 }),
@@ -20,19 +21,21 @@ function graph(width = 1000, height = 500) {
     if (!elements.has(id)) elements.set(id, {
       style: { setProperty() {} }, clientWidth: width, clientHeight: height,
       innerHTML: "", checked: false, addEventListener() {}, getContext: () => ctx,
+      contains: () => false, querySelectorAll: () => [],
     });
     return elements.get(id);
   };
   const sandbox = {
-    document: { getElementById: element, createElement: element, body: element("body") },
+    document: { getElementById: element, createElement: element, body: element("body"), addEventListener() {} },
     window: { devicePixelRatio: 2 }, performance: { now: () => 1000 },
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     getComputedStyle: () => ({ backgroundColor: "#0d1117", getPropertyValue: () => "" }),
     ResizeObserver: class { observe() {} },
     requestAnimationFrame() {}, renderSidebar() {},
+    getSelection: () => null, addEventListener() {},
   };
   vm.createContext(sandbox);
-  vm.runInContext(source + `
+  vm.runInContext((panels ? panelSource : source) + `
     reduceMotion = true;
     globalThis.graph = { build, draw, pick, toggleSelect, nodeInfo, label, nodes,
       get links() { return links; }, get selected() { return selected; },
@@ -48,6 +51,7 @@ function graph(width = 1000, height = 500) {
 function session(id, count = 0) {
   return {
     id, name: "Parent " + id, surface: "Copilot CLI", busy: true, waiting: false,
+    lastEventAt: Date.now(), tokens: { in: 0, out: 0 },
     runningTools: [], flows: [], peers: [],
     subagents: Array.from({ length: count }, (_, i) => ({
       id: "child-" + i, name: "Worker " + i, running: true,
@@ -146,4 +150,49 @@ test("empty snapshots and wide layouts remain finite and bounded", () => {
     assert.ok(Number.isFinite(n.tx) && Number.isFinite(n.ty));
     assert.ok(n.ty + 20 < api.size[1]);
   }
+});
+
+test("background shells stay visible under idle or disconnected owners without becoming agents", () => {
+  const { api, elements, labels } = graph(1000, 500, true);
+  const s = session("owner", 1);
+  s.busy = false;
+  s.live = false;
+  s.subagents[0].running = false;
+  s.backgroundShells = [{ id: "preview-server", pid: 123, startedAt: Date.now() - 3600000 }];
+  api.build(snapshot(s));
+  const parent = api.nodes.get("s:owner"), shell = api.nodes.get("b:owner:preview-server");
+  assert.ok(parent && shell);
+  assert.equal(shell.type, "shell");
+  assert.equal(parent.rows, 2);
+  assert.equal(api.nodes.has("a:owner:child-0"), false);
+  assert.equal(api.links.filter((l) => l.kind === "sub").length, 0);
+  assert.equal(api.links.filter((l) => l.kind === "background").length, 1);
+  assert.equal(elements.get("sBusy").textContent, 0);
+  assert.equal(elements.get("sSub").textContent, 0);
+  assert.equal(elements.get("sShell").textContent, 1);
+  assert.equal(elements.get("sAll").textContent, 1);
+  assert.match(elements.get("list").innerHTML, /running background shell/);
+  api.draw(1000);
+  assert.ok(labels.some((l) => l.text === "Running · background shell"));
+  assert.ok(labels.some((l) => l.text === "Detached process · PID 123"));
+  assert.ok(shell.ty > parent.ty && shell.ty + 20 < parent.ty + (parent.rows - .5) * parent.slot);
+  assert.equal(api.pick(shell.x, shell.y), shell);
+  assert.match(api.nodeInfo(shell), /not a sub-agent/);
+  assert.match(api.nodeInfo(shell), /Owner not connected/);
+  api.toggleSelect(shell);
+  assert.match(elements.get("list").innerHTML, /<details[^>]* open/);
+  assert.match(elements.get("list").innerHTML, /background shell · running · pid 123/);
+  elements.get("showIdle").checked = true;
+  api.build(snapshot(s));
+  assert.equal(api.nodes.get(shell.id), shell);
+  assert.equal(api.nodes.get(parent.id).rows, 3);
+  assert.equal(elements.get("sSub").textContent, 0);
+  s.backgroundShells = [];
+  api.build(snapshot(s));
+  assert.equal(api.nodes.has(shell.id), false);
+  assert.equal(api.selected, null);
+  elements.get("showIdle").checked = false;
+  api.build(snapshot(s));
+  assert.equal(api.nodes.has(parent.id), false);
+  assert.equal(elements.get("sShell").textContent, 0);
 });

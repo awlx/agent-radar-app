@@ -1,10 +1,54 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/awlx/copilot-radar/internal/collector"
 )
+
+type snapshotSource struct{ snapshot *collector.Snapshot }
+
+func (s snapshotSource) Snapshot() *collector.Snapshot { return s.snapshot }
+
+func TestBackgroundShellStateAndSummary(t *testing.T) {
+	snap := &collector.Snapshot{Sessions: []*collector.Session{{
+		ID: "owner", Busy: false, Live: false,
+		BackgroundShells: []collector.BackgroundShell{{ID: "preview", PID: 123, StartedAt: 1000}},
+	}}}
+	hub := NewHub(snapshotSource{snap}, 0)
+	updates := hub.Subscribe()
+	defer hub.Unsubscribe(updates)
+	hub.poll()
+	update := <-updates
+	var streamed collector.Snapshot
+	if err := json.Unmarshal(update, &streamed); err != nil || len(streamed.Sessions) != 1 || len(streamed.Sessions[0].BackgroundShells) != 1 {
+		t.Fatalf("streamed background shells missing: %s, %v", update, err)
+	}
+	handler := NewHandler(hub, "", true)
+	for _, path := range []string{"/state", "/api/snapshot"} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest("GET", "http://127.0.0.1:47900"+path, nil))
+		var got struct {
+			Sessions []struct {
+				BackgroundShells []collector.BackgroundShell `json:"backgroundShells"`
+				Status           string                      `json:"status"`
+			} `json:"sessions"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != http.StatusOK || len(got.Sessions) != 1 || len(got.Sessions[0].BackgroundShells) != 1 ||
+			got.Sessions[0].BackgroundShells[0].ID != "preview" {
+			t.Fatalf("%s: background shells lost: %s", path, w.Body)
+		}
+		if path == "/api/snapshot" && got.Sessions[0].Status != "idle" {
+			t.Fatalf("shell-only session incorrectly marked busy: %s", w.Body)
+		}
+	}
+}
 
 func TestAuth(t *testing.T) {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok")) })

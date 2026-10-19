@@ -25,6 +25,7 @@ type summarySession struct {
 	LastActivitySecondsAgo int64                  `json:"lastActivitySecondsAgo"`
 	RunningTools           []string               `json:"runningTools"`
 	Subagents              []summarySub           `json:"subagents"`
+	BackgroundShells       []BackgroundShell      `json:"backgroundShells,omitempty"`
 	DataFlowsLast2Min      []string               `json:"dataFlowsLast2Min"`
 	ModelTokens            map[string]*ModelUsage `json:"modelTokens"`
 }
@@ -39,7 +40,7 @@ func Summarize(snap *Snapshot, activeOnly bool) summary {
 	out := summary{At: time.UnixMilli(snap.Now).UTC().Format(time.RFC3339), VSCodeWindows: []summaryIDE{}, Sessions: []summarySession{}}
 	var sessions []*Session
 	for _, s := range snap.Sessions {
-		if !activeOnly || s.Busy || s.Waiting {
+		if !activeOnly || s.Busy || s.Waiting || len(s.BackgroundShells) > 0 {
 			sessions = append(sessions, s)
 		}
 	}
@@ -68,6 +69,7 @@ func Summarize(snap *Snapshot, activeOnly bool) summary {
 		ss := summarySession{ID: s.ID, Name: s.Name, Surface: s.Surface, Repo: s.Repo, Model: s.Model, Status: st,
 			LastActivitySecondsAgo: (snap.Now - s.LastEventAt) / 1000, RunningTools: []string{}, Subagents: []summarySub{},
 			DataFlowsLast2Min: []string{}, ModelTokens: s.ModelTokens}
+		ss.BackgroundShells = s.BackgroundShells
 		// Only tool names. Command arguments can contain credentials, so they stay in the local UI.
 		for _, t := range s.RunningTools {
 			ss.RunningTools = append(ss.RunningTools, t.Name)

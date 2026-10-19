@@ -40,29 +40,30 @@ type Snapshot struct {
 }
 
 type Session struct {
-	Kind          string                 `json:"kind"`
-	ID            string                 `json:"id"`
-	Live          bool                   `json:"live"`
-	Client        string                 `json:"client,omitempty"`
-	Surface       string                 `json:"surface"`
-	Name          string                 `json:"name"`
-	Cwd           string                 `json:"cwd"`
-	Folders       []string               `json:"folders,omitempty"`
-	Repo          string                 `json:"repo"`
-	Model         string                 `json:"model"`
-	Busy          bool                   `json:"busy"`
-	Waiting       bool                   `json:"waiting"`
-	PID           int                    `json:"pid,omitempty"` // a live process that has the session open
-	LastEventAt   int64                  `json:"lastEventAt"`
-	LastUser      string                 `json:"lastUser"`
-	LastAssistant string                 `json:"lastAssistant"`
-	Intent        string                 `json:"intent"`
-	RunningTools  []Tool                 `json:"runningTools"`
-	Subagents     []Subagent             `json:"subagents"`
-	Flows         []Flow                 `json:"flows"`
-	Peers         []Peer                 `json:"peers"`
-	Tokens        TokenCount             `json:"tokens"`
-	ModelTokens   map[string]*ModelUsage `json:"modelTokens"`
+	Kind             string                 `json:"kind"`
+	ID               string                 `json:"id"`
+	Live             bool                   `json:"live"`
+	Client           string                 `json:"client,omitempty"`
+	Surface          string                 `json:"surface"`
+	Name             string                 `json:"name"`
+	Cwd              string                 `json:"cwd"`
+	Folders          []string               `json:"folders,omitempty"`
+	Repo             string                 `json:"repo"`
+	Model            string                 `json:"model"`
+	Busy             bool                   `json:"busy"`
+	Waiting          bool                   `json:"waiting"`
+	PID              int                    `json:"pid,omitempty"` // a live process that has the session open
+	LastEventAt      int64                  `json:"lastEventAt"`
+	LastUser         string                 `json:"lastUser"`
+	LastAssistant    string                 `json:"lastAssistant"`
+	Intent           string                 `json:"intent"`
+	RunningTools     []Tool                 `json:"runningTools"`
+	Subagents        []Subagent             `json:"subagents"`
+	BackgroundShells []BackgroundShell      `json:"backgroundShells,omitempty"`
+	Flows            []Flow                 `json:"flows"`
+	Peers            []Peer                 `json:"peers"`
+	Tokens           TokenCount             `json:"tokens"`
+	ModelTokens      map[string]*ModelUsage `json:"modelTokens"`
 }
 
 type Tool struct {
@@ -777,7 +778,8 @@ func (c *Collector) collectCopilotSession(id string, now int64) *Session {
 		}
 	}
 	current := func(t int64) bool { return !(t < since-lockSlackMS) }
-	if !live && now-st.ModTime().UnixMilli() > recentMS {
+	backgroundShells := collectBackgroundShells(dir, id, detachedProcessAlive)
+	if !live && len(backgroundShells) == 0 && now-st.ModTime().UnixMilli() > recentMS {
 		delete(c.sessions, id)
 		return nil
 	}
@@ -906,7 +908,8 @@ func (c *Collector) collectCopilotSession(id string, now int64) *Session {
 		Name: trunc(name, 90), Cwd: cwd, Repo: repo, Model: p.model, Busy: busy, Waiting: waiting,
 		PID: ownerPID, LastEventAt: p.lastEventAt, LastUser: p.lastUser, LastAssistant: p.lastAssistant, Intent: p.intent,
 		RunningTools: runningTools, Subagents: subagents, Flows: flows, Peers: append([]Peer{}, peers...),
-		Tokens: p.tokens, ModelTokens: mt,
+		BackgroundShells: backgroundShells,
+		Tokens:           p.tokens, ModelTokens: mt,
 	}
 }
 

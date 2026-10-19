@@ -31,6 +31,7 @@
     background: color-mix(in srgb, var(--background-color-default, #0d1117) 85%, transparent); }
   #legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; background: var(--c); }
   #legend .subagent::before { border-radius: 0; transform: rotate(45deg); }
+  #legend .shell::before { border-radius: 0; }
   #tip { position: absolute; pointer-events: none; max-width: 360px; padding: 8px 10px; border-radius: 8px; display: none;
     background: color-mix(in srgb, var(--background-color-default, #0d1117) 92%, transparent);
     border: 1px solid var(--border-color-default, #30363d); box-shadow: 0 8px 24px rgba(0,0,0,.35); line-height: 1.45; z-index: 3; }
@@ -110,6 +111,7 @@
   <span class="stat"><b id="sBusy">0</b> working</span>
   <span class="stat"><b id="sWait">0</b> waiting on you</span>
   <span class="stat"><b id="sSub">0</b> sub-agents</span>
+  <span class="stat"><b id="sShell">0</b> background shells</span>
   <span class="stat"><b id="sAll">0</b> sessions</span>
   <span class="stat"><b id="sFlow">0</b> flows / 2 min</span>
   <label><input type="checkbox" id="showIdle" /> show idle</label>
@@ -159,7 +161,7 @@ function updateTheme() {
   if (next === P && document.getElementById("legend").innerHTML) return false;
   P = next;
   for (const k of ["ok", "warn", "bad"]) document.body.style.setProperty("--" + k, P[k]);
-  document.getElementById("legend").innerHTML = `<span class="subagent" style="--c:${P.other}">sub-agent (under parent)</span>` + [["Copilot app", P.app], ["VS Code agent", P.vscode], ["VS Code chat", P.chat], ["LLM", P.llm], ["data sink ▢", P.other], ["session ↔ session", P.cli]]
+  document.getElementById("legend").innerHTML = `<span class="subagent" style="--c:${P.other}">sub-agent (under parent)</span><span class="shell" style="--c:${P.other}">background shell (under owner)</span>` + [["Copilot app", P.app], ["VS Code agent", P.vscode], ["VS Code chat", P.chat], ["LLM", P.llm], ["data sink ▢", P.other], ["session ↔ session", P.cli]]
     .map(([n, c]) => `<span style="--c:${c}">${n}</span>`).join("");
   return true;
 }
@@ -219,7 +221,7 @@ function build(snap) {
   links = [];
   const L = (a, b, o = {}) => links.push({ a, b, ...o });
 
-  const sessions = snap.sessions.filter((s) => showIdle || s.busy || s.waiting)
+  const sessions = snap.sessions.filter((s) => showIdle || s.busy || s.waiting || s.backgroundShells?.length)
     .map((s) => showIdle ? s : { ...s, subagents: s.subagents.filter((a) => a.running) });
 
   // Assign each session to a hub (surface, or the VS Code window it lives in).
@@ -261,7 +263,7 @@ function build(snap) {
 
   // Vertical slots.
   let sessSlots = 0;
-  for (const g of hubList) { for (const s of g.sessions) sessSlots += 1 + s.subagents.length + .4; sessSlots += .8; }
+  for (const g of hubList) { for (const s of g.sessions) sessSlots += 1 + s.subagents.length + (s.backgroundShells?.length || 0) + .4; sessSlots += .8; }
   let sinkSlots = sinks.length + new Set(sinks.map(sinkGroup)).size * .9;
   const top = 46, bottom = 54, MIN_SLOT = 52;
   contentH = top + bottom + Math.max(sessSlots * MIN_SLOT, sinkSlots * 28, MIN_SLOT);
@@ -271,14 +273,14 @@ function build(snap) {
   const sinkSlot = Math.max(28, Math.min(44, usable / Math.max(sinkSlots, 1)));
   const X = { you: 36, hub: W * .13, sess: W * .28, agent: W * .28 + 28, sink: W - 30 };
   const familyRight = W * .65;
-  headers = [["SURFACE", X.hub], ["SESSIONS & SUB-AGENTS", X.sess - 18, "left"], ["DATA DESTINATIONS", X.sink, "right"]];
+  headers = [["SURFACE", X.hub], ["SESSIONS & CHILD ACTIVITY", X.sess - 18, "left"], ["DATA DESTINATIONS", X.sink, "right"]];
 
   let y = top + Math.max(0, (usable - sessSlots * slot) / 2) + slot / 2;
   const hubYs = [];
   for (const g of hubList) {
     const ys = [];
     for (const s of g.sessions) {
-      const rows = 1 + s.subagents.length;
+      const rows = 1 + s.subagents.length + (s.backgroundShells?.length || 0);
       const sy = y;
       const sid = "s:" + s.id, color = surfaceColor(s.surface);
       upsert(sid, { type: "session", label: s.name, color, s, tx: X.sess, ty: sy, r: 7, rows, slot, familyRight, labelWidth: familyRight - X.sess - 30 });
@@ -288,6 +290,11 @@ function build(snap) {
         const aid = "a:" + s.id + ":" + a.id;
         upsert(aid, { type: "agent", label: a.name, color, a, parent: s, tx: X.agent, ty: y + (i + 1) * slot, r: 7, labelWidth: familyRight - X.agent - 30 });
         L(sid, aid, { color, kind: "sub", active: a.running });
+      });
+      (s.backgroundShells || []).forEach((b, i) => {
+        const bid = "b:" + s.id + ":" + b.id;
+        upsert(bid, { type: "shell", label: b.id, color, b, parent: s, tx: X.agent, ty: y + (s.subagents.length + i + 1) * slot, r: 7, labelWidth: familyRight - X.agent - 30 });
+        L(sid, bid, { color, kind: "background", active: true });
       });
       y += (rows + .4) * slot;
     }
@@ -330,7 +337,7 @@ new ResizeObserver(() => { resize(); build(snapshot); }).observe(stage);
 // ---------- Geometry ----------
 function curve(l) {
   const a = nodes.get(l.a), b = nodes.get(l.b);
-  if (l.kind === "sub") return [a.x, a.y + a.r, a.x, b.y, a.x, b.y, b.x - b.r, b.y];
+  if (l.kind === "sub" || l.kind === "background") return [a.x, a.y + a.r, a.x, b.y, a.x, b.y, b.x - b.r, b.y];
   if (l.kind === "peer") { const off = 40 + Math.abs(b.y - a.y) * .25; return [a.x, a.y, a.x - off, a.y, b.x - off, b.y, b.x, b.y]; }
   const dx = (b.x - a.x) * .5;
   return [a.x, a.y, a.x + dx, a.y, b.x - dx, b.y, b.x, b.y];
@@ -437,13 +444,14 @@ function draw(t) {
   for (const n of nodes.values()) {
     const { x, y, r } = n, dim = focus && !related.has(n.id);
     ctx.globalAlpha = (dim ? .2 : 1) * (reduceMotion ? 1 : Math.min(1, (performance.now() - n.born) / 400));
-    const busy = n.type === "session" ? n.s.busy : n.type === "agent" ? n.a.running : false;
+    const busy = n.type === "session" ? n.s.busy : n.type === "agent" ? n.a.running : n.type === "shell";
     const waiting = n.type === "session" && n.s.waiting;
     if (busy || waiting) {
       const ph = reduceMotion ? .3 : (t / (waiting ? 600 : 1400)) % 1, a0 = ctx.globalAlpha;
       ctx.strokeStyle = waiting ? P.warn : n.color; ctx.lineWidth = 1.5;
       ctx.globalAlpha = a0 * (1 - ph); ctx.beginPath();
       if (n.type === "agent") diamond(x, y, r + 3 + ph * 10);
+      else if (n.type === "shell") { const sr = r + 3 + ph * 10; ctx.rect(x - sr, y - sr, sr * 2, sr * 2); }
       else ctx.arc(x, y, r + 3 + ph * 10, 0, Math.PI * 2);
       ctx.stroke();
       ctx.globalAlpha = a0;
@@ -451,7 +459,7 @@ function draw(t) {
     ctx.fillStyle = n.color; ctx.strokeStyle = n.color; ctx.lineWidth = 2;
     ctx.shadowColor = n.color; ctx.shadowBlur = busy ? 10 : 0;
     ctx.beginPath();
-    if (n.type === "sink") { ctx.rect(x - r, y - r, r * 2, r * 2); ctx.fillStyle = n.color + "33"; ctx.fill(); ctx.stroke(); }
+    if (n.type === "sink" || n.type === "shell") { ctx.rect(x - r, y - r, r * 2, r * 2); ctx.fillStyle = n.color + "33"; ctx.fill(); ctx.stroke(); }
     else if (n.type === "agent") {
       diamond(x, y, r);
       ctx.fillStyle = cssv("--background-color-default", "#0d1117"); ctx.fill();
@@ -464,6 +472,7 @@ function draw(t) {
     if (n === selected) {
       ctx.strokeStyle = text; ctx.lineWidth = 1.5; ctx.beginPath();
       if (n.type === "agent") diamond(x, y, r + 5);
+      else if (n.type === "shell") ctx.rect(x - r - 5, y - r - 5, (r + 5) * 2, (r + 5) * 2);
       else ctx.arc(x, y, r + 5, 0, Math.PI * 2);
       ctx.stroke();
     }
@@ -479,6 +488,10 @@ function draw(t) {
       label(n.label, x + r + 7, y - 15, "left", `600 12px ${sans}`, n.a.running ? text : muted, 100, n.labelWidth);
       label((n.a.running ? "Running" : "Done") + (n.a.model ? " · " + n.a.model : ""), x + r + 7, y, "left", `11px ${sans}`, n.a.running ? P.ok : muted, 100, n.labelWidth);
       label(n.a.doing || (n.a.running ? "Thinking" : "Task complete"), x + r + 7, y + 15, "left", `11px ${mono}`, muted, 100, n.labelWidth);
+    } else if (n.type === "shell") {
+      label(n.label, x + r + 7, y - 15, "left", `600 12px ${sans}`, text, 100, n.labelWidth);
+      label("Running · background shell", x + r + 7, y, "left", `11px ${sans}`, P.ok, 100, n.labelWidth);
+      label("Detached process · PID " + n.b.pid, x + r + 7, y + 15, "left", `11px ${mono}`, muted, 100, n.labelWidth);
     } else if (n.type === "sink") label(n.label, x - r - 8, y, "right", `500 11px ${sans}`, text, 100, W * .30 - 30);
   }
   ctx.globalAlpha = 1;
@@ -515,6 +528,10 @@ function nodeInfo(n, full) {
     h += `<div class="m">sub-agent · ${esc(a.type)} · ${esc(a.model || "")} · ${a.running ? "running" : "done"} ${ago(a.startedAt)}</div>`;
     if (a.doing) h += `<div>⚙️ ${esc(a.doing)}</div>`;
     if (a.said) h += `<div class="m">🤖 ${esc(a.said)}</div>`;
+    if (!full) h += `<div class="m">in ${esc(n.parent.name)}</div>`;
+  } else if (n.type === "shell") {
+    h += `<div class="m">background shell · running · pid ${esc(n.b.pid)} · started ${ago(n.b.startedAt)} ago</div>`;
+    h += `<div class="m">Detached process; not a sub-agent. Owner ${n.parent.live ? "connected" : "not connected"}.</div>`;
     if (!full) h += `<div class="m">in ${esc(n.parent.name)}</div>`;
   } else if (n.type === "sink") {
     const ins = links.filter((l) => l.b === n.id).map((l) => nodes.get(l.a)).filter(Boolean);
@@ -587,7 +604,12 @@ function detailsHTML(sid) {
     const open = openSubs.has(id) || selected?.id === id;
     return an ? `<details data-sub="${esc(id)}"${open ? " open" : ""}><summary data-id="${esc(id)}">${a.running ? "● running" : "○ done"}: <b>${esc(a.name)}</b></summary><div>${nodeInfo(an, true)}</div></details>` : "";
   }).join("");
-  return `<div class="details" id="details" role="region" aria-label="${esc("Details: " + n.s.name)}" style="--c:${n.color}">${nodeInfo(n, true)}${subs}</div>`;
+  const shells = (n.s.backgroundShells || []).map((b) => {
+    const id = "b:" + n.s.id + ":" + b.id, bn = nodes.get(id);
+    const open = openSubs.has(id) || selected?.id === id;
+    return bn ? `<details data-sub="${esc(id)}"${open ? " open" : ""}><summary data-id="${esc(id)}">Running background shell: <b>${esc(b.id)}</b></summary><div>${nodeInfo(bn, true)}</div></details>` : "";
+  }).join("");
+  return `<div class="details" id="details" role="region" aria-label="${esc("Details: " + n.s.name)}" style="--c:${n.color}">${nodeInfo(n, true)}${subs}${shells}</div>`;
 }
 function renderSidebar(snap, sessions, force) {
   sidebarArgs = [snap, sessions];
@@ -597,6 +619,7 @@ function renderSidebar(snap, sessions, force) {
   document.getElementById("sBusy").textContent = busy;
   document.getElementById("sWait").textContent = wait;
   document.getElementById("sSub").textContent = subs;
+  document.getElementById("sShell").textContent = sessions.reduce((n, s) => n + (s.backgroundShells?.length || 0), 0);
   document.getElementById("sAll").textContent = sessions.length;
   document.getElementById("sFlow").textContent = flows;
 
@@ -609,8 +632,8 @@ function renderSidebar(snap, sessions, force) {
     destsOf.get(sid).add(l.b.slice(2));
   }
   const cardAttrs = (id) => `tabindex="0" role="button" aria-pressed="${selected?.id === id}" data-id="${esc(id)}"`;
-  // A selected sub-agent shows the details of its session.
-  const openSid = selected?.type === "agent" ? "s:" + selected.parent.id : selected?.type === "session" ? selected.id : null;
+  // A selected child shows the details of its owning session.
+  const openSid = selected?.type === "agent" || selected?.type === "shell" ? "s:" + selected.parent.id : selected?.type === "session" ? selected.id : null;
   let listH = !sessions.length ? `<div class="empty">No agents are working right now.</div>` : `<h2>Agents</h2>` + sessions.map((s) => {
     const c = surfaceColor(s.surface);
     const st = s.waiting ? "wait" : s.busy ? "busy" : "";
@@ -618,13 +641,14 @@ function renderSidebar(snap, sessions, force) {
     const doing = s.waiting ? "⏳ waiting for your input / approval"
       : t ? `⚙️ ${t.name}${t.desc ? ": " + t.desc : ""}` : s.busy ? (s.intent ? "🧠 " + s.intent : "🧠 thinking…") : s.lastAssistant ? "✓ " + s.lastAssistant : "";
     const subsH = s.subagents.map((a) => `<div class="sub"><span style="color:${a.running ? P.ok : "inherit"}" role="img" aria-label="${a.running ? "running" : "done"}">${a.running ? "●" : "○"}</span> <b>${esc(a.name)}</b> ${esc(a.model || "")}${a.doing ? " — " + esc(a.doing) : ""}</div>`).join("");
+    const shellsH = (s.backgroundShells || []).map((b) => `<div class="sub"><b>${esc(b.id)}</b> — running background shell · PID ${esc(b.pid)}</div>`).join("");
     const dests = [...(destsOf.get("s:" + s.id) || [])].sort();
     const destH = dests.length ? `<div class="meta" title="${esc(dests.join(", "))}">→ ${esc(dests.join(", "))}</div>` : "";
     const open = openSid === "s:" + s.id;
     return `<div class="card ${selected?.id === "s:" + s.id ? "sel" : ""}" style="--c:${c}" ${cardAttrs("s:" + s.id)} aria-expanded="${open}"${open ? ` aria-controls="details"` : ""}>
       <div class="row"><div class="dot ${st}"></div><div class="name" title="${esc(s.name)}">${esc(s.name)}</div><span class="pill">${esc(s.surface)}</span></div>
       <div class="meta">${esc(s.repo || s.cwd || "")}${s.model ? " · " + esc(s.model) : ""} · ${ago(s.lastEventAt)} ago</div>
-      ${doing ? `<div class="doing" title="${esc(doing)}">${esc(doing)}</div>` : ""}${subsH}${destH}</div>${open ? detailsHTML("s:" + s.id) : ""}`;
+      ${doing ? `<div class="doing" title="${esc(doing)}">${esc(doing)}</div>` : ""}${subsH}${shellsH}${destH}</div>${open ? detailsHTML("s:" + s.id) : ""}`;
   }).join("");
   const sinkNodes = [...nodes.values()].filter((n) => n.type === "sink").sort((a, b) => a.ty - b.ty);
   if (sinkNodes.length) listH += `<h2>Destinations</h2>` + sinkNodes.map((n) => {
@@ -796,6 +820,8 @@ function demoSnapshot() {
       runningTools: [{ id: "t4", name: "web_fetch", desc: "https://pkg.go.dev/golang.org/x/net", startedAt: s(2), sink: "Web" }],
       flows: [fl("Build / run", "bash", "$ go get -u ./... && go mod tidy", 15), fl("Containers", "bash", "$ docker build -t infra-tools:dev .", 45), llm("GPT-5 mini", 15800, 600, 5)],
       modelTokens: { "GPT-5 mini": { in: 260000, out: 9800, calls: 22 } } }),
+    sess({ id: "demo-0005", surface: "Copilot CLI", name: "Preview server (agent idle)", cwd: "/home/dev/src/web-portal", repo: "web-portal", busy: false,
+      backgroundShells: [{ id: "preview-server", pid: 12345, startedAt: s(3600) }] }),
   ];
   return { now, sessions, ides: [{ id: "demo-ide", ide: "Visual Studio Code", pid: 1, folders: ["/home/dev/src/web-portal"] }] };
 }
