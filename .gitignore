@@ -1,0 +1,5 @@
+/copilot-radar
+/copilot-radar.exe
+/dist/
+.playwright-mcp/
+.DS_Store

@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: gofmt
+        if: runner.os != 'Windows'
+        run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test ./...
+
+  macos-app:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: ./macos/build-app.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Copilot-Radar-app
+          path: dist/
+
+  windows-app:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: ./windows/build-app.sh
+      - name: Smoke test (demo mode)
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "dist/windows/amd64/Copilot Radar.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "-demo" -PassThru
+          $state = $null
+          for ($i = 0; $i -lt 30 -and -not $state; $i++) {
+            Start-Sleep -Seconds 1
+            try { $state = Invoke-RestMethod "http://127.0.0.1:47900/state" } catch {}
+          }
+          if (-not $state) { throw "The app did not serve /state" }
+          Write-Host "Sessions in demo state: $($state.sessions.Count)"
+          $p.Refresh()
+          if ($p.HasExited) { throw "The app stopped" }
+          Write-Host "Main window title: '$($p.MainWindowTitle)'"
+          $log = Join-Path $env:LOCALAPPDATA "Copilot Radar\copilot-radar.log"
+          if (Test-Path $log) { Get-Content $log }
+          Stop-Process -Id $p.Id -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Copilot-Radar-Windows
+          path: dist/windows/
