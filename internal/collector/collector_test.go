@@ -400,10 +400,41 @@ func TestWorkspaceRootsCodeWorkspace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(wsDir, "workspace.json"), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := workspaceRoots(wsDir)
+	got, saved := workspaceRoots(wsDir)
 	want := []string{filepath.Join(dir, "api"), filepath.Join(dir, "team", "web")}
-	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("workspaceRoots = %q, want %q", got, want)
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] || saved != wsFile {
+		t.Fatalf("workspaceRoots = %q, %q, want %q, %q", got, saved, want, wsFile)
+	}
+	c := &Collector{vscodeDirs: []string{dir}}
+	_ = os.MkdirAll(filepath.Join(dir, "workspaceStorage"), 0o700)
+	if f := c.savedWorkspace([]string{want[1], want[0]}); f != "" {
+		t.Fatalf("savedWorkspace without a storage entry = %q", f)
+	}
+	if err := os.Rename(wsDir, filepath.Join(dir, "workspaceStorage", "abc")); err != nil {
+		t.Fatal(err)
+	}
+	// The new storage entry changes the workspaceStorage folder, so the empty result is not used again.
+	_ = os.Chtimes(filepath.Join(dir, "workspaceStorage"), time.Now().Add(time.Minute), time.Now().Add(time.Minute))
+	if f := c.savedWorkspace([]string{want[1], want[0]}); f != wsFile {
+		t.Fatalf("savedWorkspace = %q, want %q", f, wsFile)
+	}
+	if f := c.savedWorkspace([]string{want[0]}); f != "" {
+		t.Fatalf("savedWorkspace of other roots = %q", f)
+	}
+	untitled := filepath.Join(dir, "Workspaces", "1", "workspace.json")
+	_ = os.MkdirAll(filepath.Dir(untitled), 0o700)
+	if err := os.WriteFile(untitled, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	uu := (&url.URL{Scheme: "file", Path: filepath.ToSlash(untitled)}).String()
+	if runtime.GOOS == "windows" {
+		uu = "file:///" + filepath.ToSlash(untitled)
+	}
+	b, _ = json.Marshal(map[string]string{"workspace": uu})
+	_ = os.MkdirAll(filepath.Join(dir, "untitled"), 0o700)
+	_ = os.WriteFile(filepath.Join(dir, "untitled", "workspace.json"), b, 0o600)
+	if roots, saved := workspaceRoots(filepath.Join(dir, "untitled")); len(roots) != 2 || saved != "" {
+		t.Fatalf("untitled workspace: %q, %q", roots, saved)
 	}
 	s := &Session{Cwd: got[0], Folders: got}
 	if r := sessionRoots(s); len(r) != 2 {

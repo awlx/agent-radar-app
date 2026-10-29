@@ -58,14 +58,14 @@ var ideEditors = map[string]string{
 	"VSCodium":                      "VSCodium",
 }
 
-func jumpTo(kind, id, surface, name, cwd string, folders []string, pid int) jumpTarget {
+func jumpTo(kind, id, surface, name, cwd, workspace string, folders []string, pid int) jumpTarget {
 	title := strings.Join(strings.Fields(name), " ")
 	if title == "" {
 		title = "Session " + id[:min(8, len(id))]
 	}
 	t := jumpTarget{title: truncate(title, 60) + " — " + surface, folder: cwd, pid: pid}
 	if len(folders) > 0 {
-		t.folder = folders[0]
+		t.folder = windowPath(folders, workspace)
 	}
 	switch {
 	case surface == "Copilot app":
@@ -74,6 +74,16 @@ func jumpTo(kind, id, surface, name, cwd string, folders []string, pid int) jump
 		t.editor = strings.TrimSuffix(surface, " chat")
 	}
 	return t
+}
+
+// windowPath gives the path that the editor opens to show a VS Code window: the saved workspace file,
+// or the folder. An unsaved multi-root window has no such path, because the editor opens a folder of
+// it in a new window. Then the path is "", and the editor only comes to the front.
+func windowPath(folders []string, workspace string) string {
+	if workspace != "" || len(folders) != 1 {
+		return workspace
+	}
+	return folders[0]
 }
 
 // record encodes the target as one line with tab-separated fields for the Objective-C code.
@@ -120,17 +130,18 @@ func shortCount(n int64) string {
 func statusOf(state []byte) trayStatus {
 	var snap struct {
 		Sessions []struct {
-			Kind    string   `json:"kind"`
-			ID      string   `json:"id"`
-			Name    string   `json:"name"`
-			Surface string   `json:"surface"`
-			Cwd     string   `json:"cwd"`
-			Folders []string `json:"folders"`
-			PID     int      `json:"pid"`
-			Model   string   `json:"model"`
-			Busy    bool     `json:"busy"`
-			Waiting bool     `json:"waiting"`
-			Flows   []struct {
+			Kind      string   `json:"kind"`
+			ID        string   `json:"id"`
+			Name      string   `json:"name"`
+			Surface   string   `json:"surface"`
+			Cwd       string   `json:"cwd"`
+			Folders   []string `json:"folders"`
+			Workspace string   `json:"workspace"`
+			PID       int      `json:"pid"`
+			Model     string   `json:"model"`
+			Busy      bool     `json:"busy"`
+			Waiting   bool     `json:"waiting"`
+			Flows     []struct {
 				Sink    string `json:"sink"`
 				Model   string `json:"model"`
 				AgentID string `json:"agentId"`
@@ -138,8 +149,9 @@ func statusOf(state []byte) trayStatus {
 			} `json:"flows"`
 		} `json:"sessions"`
 		IDEs []struct {
-			IDE     string   `json:"ide"`
-			Folders []string `json:"folders"`
+			IDE       string   `json:"ide"`
+			Folders   []string `json:"folders"`
+			Workspace string   `json:"workspace"`
 		} `json:"ides"`
 	}
 	var st trayStatus
@@ -171,14 +183,15 @@ func statusOf(state []byte) trayStatus {
 	for _, s := range snap.Sessions {
 		if s.Waiting {
 			st.waiting++
-			t := jumpTo(s.Kind, s.ID, s.Surface, s.Name, s.Cwd, s.Folders, s.PID)
+			t := jumpTo(s.Kind, s.ID, s.Surface, s.Name, s.Cwd, s.Workspace, s.Folders, s.PID)
 			if s.Surface == "VS Code agent" {
 				// The session belongs to the editor window that has its folder open.
 				// The longest folder wins: a window for /repo/sub is closer than a window for /repo.
+				best := -1
 				for _, ide := range snap.IDEs {
 					for _, f := range ide.Folders {
-						if ideEditors[ide.IDE] != "" && collector.InFolder(s.Cwd, f) && (t.editor == "" || len(f) > len(t.folder)) {
-							t.editor, t.folder = ideEditors[ide.IDE], f
+						if ideEditors[ide.IDE] != "" && collector.InFolder(s.Cwd, f) && len(f) > best {
+							best, t.editor, t.folder = len(f), ideEditors[ide.IDE], windowPath(ide.Folders, ide.Workspace)
 						}
 					}
 				}

@@ -32,9 +32,15 @@ func TestJumpTargets(t *testing.T) {
 		{"kind":"vscode-chat","id":"x","name":"Chat","surface":"Code - Insiders chat","cwd":"/a","folders":["/w"],"waiting":true},
 		{"kind":"copilot","id":"agent","name":"Agent","surface":"VS Code agent","cwd":"/repo/sub","pid":9,"waiting":true},
 		{"kind":"copilot","id":"lost","name":"Lost","surface":"VS Code agent","cwd":"/elsewhere","pid":9,"waiting":true},
+		{"kind":"copilot","id":"saved","name":"Saved","surface":"VS Code agent","cwd":"/multi/a","pid":9,"waiting":true},
+		{"kind":"copilot","id":"unsaved","name":"Unsaved","surface":"VS Code agent","cwd":"/untitled/a","pid":9,"waiting":true},
+		{"kind":"vscode-chat","id":"y","name":"Multi","surface":"Code chat","cwd":"/multi/a","folders":["/multi/a","/multi/b"],"workspace":"/w/multi.code-workspace","waiting":true},
+		{"kind":"vscode-chat","id":"z","name":"Untitled","surface":"Code chat","cwd":"/untitled/a","folders":["/untitled/a","/untitled/b"],"waiting":true},
 		{"kind":"copilot","id":"busy","surface":"Copilot CLI","busy":true}],
-		"ides":[{"ide":"Some IDE","folders":["/repo"]},{"ide":"Visual Studio Code","folders":["/repo"]},{"ide":"Visual Studio Code - Insiders","folders":["/other","/repo/sub"]}]}`))
-	if len(st.waits) != 5 {
+		"ides":[{"ide":"Some IDE","folders":["/repo"]},{"ide":"Visual Studio Code","folders":["/repo"]},{"ide":"Visual Studio Code - Insiders","folders":["/repo/sub"]},
+			{"ide":"Visual Studio Code","folders":["/multi/a","/multi/b"],"workspace":"/w/multi.code-workspace"},
+			{"ide":"Visual Studio Code","folders":["/untitled/a","/untitled/b"]}]}`))
+	if len(st.waits) != 9 {
 		t.Fatalf("waits: %v", st.waits)
 	}
 	if got := st.waits[0].record(); got != "Fix the build — Copilot app\tghapp://sessions/abc\t42\t/r\t" {
@@ -51,6 +57,17 @@ func TestJumpTargets(t *testing.T) {
 	}
 	if got := st.waits[4].record(); got != "Lost — VS Code agent\t\t9\t/elsewhere\t" {
 		t.Fatalf("vscode agent without a window: %q", got)
+	}
+	// A multi-root window opens by its saved workspace file. Without one, only the editor comes to the front.
+	for i, want := range []string{
+		"Saved — VS Code agent\t\t9\t/w/multi.code-workspace\tcom.microsoft.VSCode",
+		"Unsaved — VS Code agent\t\t9\t\tcom.microsoft.VSCode",
+		"Multi — Code chat\t\t0\t/w/multi.code-workspace\tcom.microsoft.VSCode",
+		"Untitled — Code chat\t\t0\t\tcom.microsoft.VSCode",
+	} {
+		if got := st.waits[5+i].record(); got != want {
+			t.Errorf("multi-root %d: %q, want %q", i, got, want)
+		}
 	}
 }
 

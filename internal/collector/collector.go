@@ -48,6 +48,7 @@ type Session struct {
 	Name             string                 `json:"name"`
 	Cwd              string                 `json:"cwd"`
 	Folders          []string               `json:"folders,omitempty"`
+	Workspace        string                 `json:"workspace,omitempty"` // the saved .code-workspace file of a VS Code chat window
 	Repo             string                 `json:"repo"`
 	Model            string                 `json:"model"`
 	Busy             bool                   `json:"busy"`
@@ -170,10 +171,11 @@ func count(v any) int64 {
 }
 
 type IDE struct {
-	ID      string   `json:"id"`
-	IDE     string   `json:"ide"`
-	PID     int      `json:"pid"`
-	Folders []string `json:"folders"`
+	ID        string   `json:"id"`
+	IDE       string   `json:"ide"`
+	PID       int      `json:"pid"`
+	Folders   []string `json:"folders"`
+	Workspace string   `json:"workspace,omitempty"` // the saved .code-workspace file of a multi-root window
 }
 
 // ---- Collector ----
@@ -189,6 +191,10 @@ type Collector struct {
 	vscode   map[string]*vscodeEntry
 
 	vscodeScanStart int64
+
+	// The saved workspace files by their root folders, and the change times of the workspaceStorage folders.
+	savedWorkspaces map[string]string
+	storageStamp    string
 }
 
 func New() *Collector {
@@ -1057,6 +1063,54 @@ func (c *Collector) collectIDEs() []IDE {
 			j.WorkspaceFolders = []string{}
 		}
 		out = append(out, IDE{ID: strings.TrimSuffix(de.Name(), ".lock"), IDE: j.IDEName, PID: j.PID, Folders: j.WorkspaceFolders})
+		if len(j.WorkspaceFolders) > 1 {
+			out[len(out)-1].Workspace = c.savedWorkspace(j.WorkspaceFolders)
+		}
 	}
 	return out
+}
+
+// savedWorkspace gives the saved .code-workspace file that has these root folders, or "".
+// VS Code keeps a workspace.json for each window in workspaceStorage. The results stay until a
+// workspaceStorage folder changes, for example when VS Code adds the entry of a newly saved workspace.
+func (c *Collector) savedWorkspace(folders []string) string {
+	stamp := ""
+	for _, d := range c.vscodeDirs {
+		if st, err := os.Stat(filepath.Join(d, "workspaceStorage")); err == nil {
+			stamp += st.ModTime().String() + "\n"
+		}
+	}
+	if c.savedWorkspaces == nil || stamp != c.storageStamp {
+		c.savedWorkspaces, c.storageStamp = map[string]string{}, stamp
+	}
+	key := rootsKey(folders)
+	if f, ok := c.savedWorkspaces[key]; ok {
+		return f
+	}
+	best, bestAt := "", time.Time{}
+	for _, d := range c.vscodeDirs {
+		root := filepath.Join(d, "workspaceStorage")
+		ents, _ := os.ReadDir(root)
+		for _, e := range ents {
+			roots, file := workspaceRoots(filepath.Join(root, e.Name()))
+			if file == "" || rootsKey(roots) != key {
+				continue
+			}
+			if st, err := os.Stat(file); err == nil && st.ModTime().After(bestAt) {
+				best, bestAt = file, st.ModTime()
+			}
+		}
+	}
+	c.savedWorkspaces[key] = best
+	return best
+}
+
+// rootsKey gives the same key for the same root folders in any order.
+func rootsKey(folders []string) string {
+	n := make([]string, len(folders))
+	for i, f := range folders {
+		n[i] = normPath(f)
+	}
+	sort.Strings(n)
+	return strings.Join(n, "\n")
 }
