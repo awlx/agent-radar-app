@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>Copilot Radar</string>
+	<string>Agent Radar</string>
 	<key>CFBundleDisplayName</key>
-	<string>Copilot Radar</string>
+	<string>Agent Radar</string>
 	<key>CFBundleIdentifier</key>
-	<string>io.github.awlx.copilot-radar</string>
+	<string>io.github.awlx.agent-radar</string>
 	<key>CFBundleExecutable</key>
-	<string>copilot-radar</string>
+	<string>agent-radar</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>

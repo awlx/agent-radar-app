@@ -1,4 +1,4 @@
-module github.com/awlx/copilot-radar
+module github.com/awlx/agent-radar-app
 
 go 1.22
 

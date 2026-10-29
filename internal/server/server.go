@@ -16,13 +16,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/awlx/copilot-radar/internal/collector"
+	"github.com/awlx/agent-radar-app/internal/collector"
 )
 
 //go:embed ui/ui.html
 var uiHTML []byte
 
-const cookieName = "copilot_radar_token"
+const cookieName = "agent_radar_token"
 
 func IsLoopbackHost(h string) bool {
 	if h == "localhost" {
@@ -223,7 +223,7 @@ func secure(next http.Handler, token string, loopback bool) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		http.Error(w, "unauthorized: open the URL with ?token=… that copilot-radar printed at start", http.StatusUnauthorized)
+		http.Error(w, "unauthorized: open the URL with ?token=… that agent-radar printed at start", http.StatusUnauthorized)
 	})
 }
 

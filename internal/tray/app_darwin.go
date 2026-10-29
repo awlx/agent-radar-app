@@ -12,6 +12,20 @@ package tray
 
 static NSString *const kStayKey = @"stayInForeground";
 
+// migrateDefaults copies the settings of the app from before the rename ("Copilot Radar") one time.
+static void migrateDefaults(void) {
+	NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
+	if (bundleID == nil) return;
+	NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+	if ([d persistentDomainForName:bundleID].count > 0) return;
+	NSDictionary *old = [d persistentDomainForName:@"io.github.awlx.copilot-radar"];
+	if (old.count == 0) return;
+	NSMutableDictionary *dom = [old mutableCopy];
+	id frame = dom[@"NSWindow Frame CopilotRadarWindow"];
+	if (frame != nil) dom[@"NSWindow Frame AgentRadarWindow"] = frame;
+	[d setPersistentDomain:dom forName:bundleID];
+}
+
 // Blip positions in the tray icon: radius (points) and angle (degrees).
 static const double kBlips[][2] = {{5.4, 35}, {3.2, 150}, {6.0, 245}, {4.4, 320}, {2.4, 85}, {6.2, 195}};
 static const int kMaxBlips = sizeof(kBlips) / sizeof(kBlips[0]);
@@ -91,7 +105,7 @@ static NSImage *radarIcon(RadarStatus status, int blips) {
 		return YES;
 	}];
 	img.template = NO;
-	img.accessibilityDescription = status == RadarWaiting ? @"Copilot Radar: an agent waits for you" : status == RadarWorking ? @"Copilot Radar: agents work" : @"Copilot Radar: no active agents";
+	img.accessibilityDescription = status == RadarWaiting ? @"Agent Radar: an agent waits for you" : status == RadarWorking ? @"Agent Radar: agents work" : @"Agent Radar: no active agents";
 	return img;
 }
 
@@ -119,6 +133,7 @@ static NSMenuItem *menuItem(NSString *title, SEL action, NSString *key, id targe
 @implementation RadarApp
 
 - (void)applicationDidFinishLaunching:(NSNotification *)note {
+	migrateDefaults();
 	[self buildMainMenu];
 	[self buildStatusItem];
 	[self buildWindow];
@@ -136,12 +151,12 @@ static NSMenuItem *menuItem(NSString *title, SEL action, NSString *key, id targe
 - (void)buildMainMenu {
 	NSMenu *bar = [NSMenu new];
 
-	NSMenu *appMenu = [[NSMenu alloc] initWithTitle:@"Copilot Radar"];
-	[appMenu addItem:menuItem(@"About Copilot Radar", @selector(about:), @"", self)];
+	NSMenu *appMenu = [[NSMenu alloc] initWithTitle:@"Agent Radar"];
+	[appMenu addItem:menuItem(@"About Agent Radar", @selector(about:), @"", self)];
 	[appMenu addItem:[NSMenuItem separatorItem]];
-	[appMenu addItem:menuItem(@"Hide Copilot Radar", @selector(hide:), @"h", NSApp)];
+	[appMenu addItem:menuItem(@"Hide Agent Radar", @selector(hide:), @"h", NSApp)];
 	[appMenu addItem:[NSMenuItem separatorItem]];
-	[appMenu addItem:menuItem(@"Quit Copilot Radar", @selector(terminate:), @"q", NSApp)];
+	[appMenu addItem:menuItem(@"Quit Agent Radar", @selector(terminate:), @"q", NSApp)];
 
 	NSMenu *edit = [[NSMenu alloc] initWithTitle:@"Edit"];
 	[edit addItem:menuItem(@"Copy", @selector(copy:), @"c", nil)];
@@ -172,7 +187,7 @@ static NSMenuItem *menuItem(NSString *title, SEL action, NSString *key, id targe
 	self.item.button.image = radarIcon(RadarIdle, 0);
 	self.item.button.font = [NSFont monospacedDigitSystemFontOfSize:NSFont.systemFontSize weight:NSFontWeightMedium];
 	self.item.button.imagePosition = NSImageLeft;
-	self.item.button.toolTip = @"Copilot Radar";
+	self.item.button.toolTip = @"Agent Radar";
 
 	NSMenu *menu = [NSMenu new];
 	self.statusLine = [[NSMenuItem alloc] initWithTitle:@"No active agents" action:nil keyEquivalent:@""];
@@ -184,7 +199,7 @@ static NSMenuItem *menuItem(NSString *title, SEL action, NSString *key, id targe
 	[menu addItem:self.trayStay];
 	[menu addItem:menuItem(@"Open in Browser", @selector(openInBrowser:), @"", self)];
 	[menu addItem:[NSMenuItem separatorItem]];
-	[menu addItem:menuItem(@"Quit Copilot Radar", @selector(terminate:), @"q", NSApp)];
+	[menu addItem:menuItem(@"Quit Agent Radar", @selector(terminate:), @"q", NSApp)];
 	self.item.menu = menu;
 }
 
@@ -192,13 +207,13 @@ static NSMenuItem *menuItem(NSString *title, SEL action, NSString *key, id targe
 	NSRect frame = NSMakeRect(0, 0, 1440, 900);
 	NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
 	self.window = [[NSWindow alloc] initWithContentRect:frame styleMask:style backing:NSBackingStoreBuffered defer:NO];
-	self.window.title = @"Copilot Radar";
+	self.window.title = @"Agent Radar";
 	self.window.releasedWhenClosed = NO;
 	self.window.delegate = self;
 	self.window.minSize = NSMakeSize(720, 480);
 	self.window.backgroundColor = [NSColor colorWithSRGBRed:0.05 green:0.07 blue:0.09 alpha:1];
 	[self.window center];
-	[self.window setFrameAutosaveName:@"CopilotRadarWindow"];
+	[self.window setFrameAutosaveName:@"AgentRadarWindow"];
 
 	WKWebViewConfiguration *cfg = [WKWebViewConfiguration new];
 	self.web = [[WKWebView alloc] initWithFrame:frame configuration:cfg];
@@ -259,7 +274,7 @@ static NSMenuItem *menuItem(NSString *title, SEL action, NSString *key, id targe
 
 - (void)about:(id)sender {
 	[NSApp orderFrontStandardAboutPanelWithOptions:@{
-		NSAboutPanelOptionApplicationName : @"Copilot Radar",
+		NSAboutPanelOptionApplicationName : @"Agent Radar",
 		NSAboutPanelOptionApplicationVersion : self.version,
 		NSAboutPanelOptionVersion : @"",
 	}];
@@ -410,7 +425,7 @@ static NSRunningApplication *appOf(pid_t pid) {
 	self.item.button.title = active > 0 ? [NSString stringWithFormat:@" %d", active] : @"";
 	NSString *line = active == 0 ? @"No active agents" : [NSString stringWithFormat:@"%d working · %d waiting for you", working, waiting];
 	self.statusLine.title = line;
-	self.item.button.toolTip = [@"Copilot Radar — " stringByAppendingString:line];
+	self.item.button.toolTip = [@"Agent Radar — " stringByAppendingString:line];
 }
 
 @end

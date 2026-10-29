@@ -39,7 +39,7 @@ jobs:
       - run: ./macos/build-app.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: Copilot-Radar-app
+          name: Agent-Radar-app
           path: dist/
 
   windows-app:
@@ -56,7 +56,7 @@ jobs:
       - name: Smoke test (demo mode)
         shell: pwsh
         run: |
-          $exe = Resolve-Path "dist/windows/amd64/Copilot Radar.exe"
+          $exe = Resolve-Path "dist/windows/amd64/Agent Radar.exe"
           $p = Start-Process -FilePath $exe -ArgumentList "-demo" -PassThru
           $state = $null
           for ($i = 0; $i -lt 30 -and -not $state; $i++) {
@@ -68,10 +68,10 @@ jobs:
           $p.Refresh()
           if ($p.HasExited) { throw "The app stopped" }
           Write-Host "Main window title: '$($p.MainWindowTitle)'"
-          $log = Join-Path $env:LOCALAPPDATA "Copilot Radar\copilot-radar.log"
+          $log = Join-Path $env:LOCALAPPDATA "Agent Radar\agent-radar.log"
           if (Test-Path $log) { Get-Content $log }
           Stop-Process -Id $p.Id -Force
       - uses: actions/upload-artifact@v4
         with:
-          name: Copilot-Radar-Windows
+          name: Agent-Radar-Windows
           path: dist/windows/

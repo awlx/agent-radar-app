@@ -3,7 +3,7 @@
 # Run on macOS: the menu bar app needs cgo and the Apple tools.
 # The script also builds the Windows tray app, which does not need cgo.
 set -eu
-# The CLI archives have the prefix "copilot-radar-cli". The app archives have the prefix "Copilot-Radar".
+# The CLI archives have the prefix "agent-radar-cli". The app archives have the prefix "Agent-Radar".
 # The names must be different without case: the macOS file system ignores case.
 cd "$(dirname "$0")/.."
 
@@ -17,11 +17,11 @@ mkdir -p "$OUT"
 for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
 	os="${target%/*}"
 	arch="${target#*/}"
-	name="copilot-radar-cli_${VERSION}_${os}_${arch}"
+	name="agent-radar-cli_${VERSION}_${os}_${arch}"
 	mkdir -p "$TMP/$name"
-	exe=copilot-radar
-	[ "$os" = windows ] && exe=copilot-radar.exe
-	CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$TMP/$name/$exe" ./cmd/copilot-radar
+	exe=agent-radar
+	[ "$os" = windows ] && exe=agent-radar.exe
+	CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$TMP/$name/$exe" ./cmd/agent-radar
 	cp README.md LICENSE "$TMP/$name/"
 	if [ "$os" = windows ]; then
 		(cd "$TMP" && zip -qr "$OLDPWD/$OUT/$name.zip" "$name")
@@ -31,19 +31,19 @@ for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
 done
 
 VERSION="$VERSION" ./macos/build-app.sh
-name="copilot-radar-cli_${VERSION}_darwin_universal"
+name="agent-radar-cli_${VERSION}_darwin_universal"
 mkdir -p "$TMP/$name"
-cp "dist/Copilot Radar.app/Contents/MacOS/copilot-radar" README.md LICENSE "$TMP/$name/"
+cp "dist/Agent Radar.app/Contents/MacOS/agent-radar" README.md LICENSE "$TMP/$name/"
 tar -C "$TMP" -czf "$OUT/$name.tar.gz" "$name"
-ditto -c -k --keepParent "dist/Copilot Radar.app" "$OUT/Copilot-Radar_${VERSION}_macOS.zip"
+ditto -c -k --keepParent "dist/Agent Radar.app" "$OUT/Agent-Radar_${VERSION}_macOS.zip"
 
 VERSION="$VERSION" ./windows/build-app.sh
 for arch in amd64 arm64; do
 	label=x64
 	[ "$arch" = arm64 ] && label=ARM64
-	name="Copilot-Radar_${VERSION}_Windows_${label}"
+	name="Agent-Radar_${VERSION}_Windows_${label}"
 	mkdir -p "$TMP/$name"
-	cp "dist/windows/$arch/Copilot Radar.exe" README.md LICENSE "$TMP/$name/"
+	cp "dist/windows/$arch/Agent Radar.exe" README.md LICENSE "$TMP/$name/"
 	(cd "$TMP" && zip -qr "$OLDPWD/$OUT/$name.zip" "$name")
 done
 

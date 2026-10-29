@@ -1,5 +1,5 @@
-/copilot-radar
-/copilot-radar.exe
+/agent-radar
+/agent-radar.exe
 /dist/
 .playwright-mcp/
 .DS_Store
