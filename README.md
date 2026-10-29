@@ -16,6 +16,8 @@ The screenshot shows mock data from the demo mode.
 
 **The app contains everything.** Download it, open it, and the radar starts.
 
+If you use the GitHub Copilot app and do not want a different app, use the [Copilot app extension](#use-the-copilot-app-extension) instead.
+
 | App | Download | Requirements |
 |-----|----------|--------------|
 | **macOS app** with a menu bar icon | [`Agent-Radar_<version>_macOS.zip`](https://github.com/awlx/agent-radar-app/releases/latest) | macOS 13 or later, Apple silicon or Intel |
@@ -66,6 +68,23 @@ The old name of this app was Copilot Radar.
 2. Install Agent Radar.
 3. Open Agent Radar one time. The app copies your settings. On Windows, it also replaces the "Start at Login" entry of the old app.
 4. Remove `Copilot Radar.app` or the `Copilot Radar` folder.
+
+## Use the Copilot app extension
+
+The [Agent Radar extension](https://github.com/github/awesome-copilot/tree/main/extensions/agent-radar) in [Awesome Copilot](https://github.com/github/awesome-copilot) shows the radar in a canvas of the GitHub Copilot app.
+Use the extension if you use the Copilot app and do not want to install a different app.
+The extension does not have a menu bar icon or a tray icon.
+
+The extension needs a version of the GitHub Copilot app that has canvas support.
+
+1. Install the plugin with this command:
+
+   ```sh
+   copilot plugin install agent-radar@awesome-copilot
+   ```
+
+2. In the Copilot app, open **Canvases**.
+3. Open **Agent Radar**.
 
 ## Supported products
 
