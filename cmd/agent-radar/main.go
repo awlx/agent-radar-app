@@ -74,9 +74,14 @@ func main() {
 	}
 
 	hub := server.NewHub(col, *poll)
+	// Only the app on this computer can show the app of a session. A LAN client must not move windows here.
+	var jump func([]byte, string) bool
+	if appMode && loopback && !*demoFlag {
+		jump = tray.Jump
+	}
 	srv := &http.Server{
 		Addr:              *listen,
-		Handler:           server.NewHandler(hub, *token, loopback),
+		Handler:           server.NewHandler(hub, *token, loopback, jump),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	ln, err := net.Listen("tcp", *listen)

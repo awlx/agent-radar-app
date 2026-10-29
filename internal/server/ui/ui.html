@@ -60,6 +60,10 @@
   .details summary { cursor: pointer; }
   .details summary:focus-visible { outline: 2px solid var(--c, #8957e5); outline-offset: 1px; }
   .details details > div { margin-left: 14px; }
+  .details .jump { margin: 2px 0 6px; padding: 2px 10px; border: 1px solid var(--c, #8957e5); border-radius: 6px; font: inherit; cursor: pointer;
+    background: color-mix(in srgb, var(--c, #8957e5) 15%, transparent); color: var(--text-color-default, #e6edf3); }
+  .details .jump:hover { background: color-mix(in srgb, var(--c, #8957e5) 30%, transparent); }
+  .details .jump:focus-visible { outline: 2px solid var(--c, #8957e5); outline-offset: 1px; }
   .card.dest .name { color: var(--text-color-default, #e6edf3); }
   .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #6e7681; }
   .dot.busy { background: var(--ok, #3fb950); box-shadow: 0 0 6px var(--ok, #3fb950); animation: blink 1s infinite; }
@@ -703,7 +707,16 @@ function detailsHTML(sid) {
     const open = openSubs.has(id) || selected?.id === id;
     return bn ? `<details data-sub="${esc(id)}"${open ? " open" : ""}><summary data-id="${esc(id)}">Running background shell: <b>${esc(b.id)}</b></summary><div>${nodeInfo(bn, true)}</div></details>` : "";
   }).join("");
-  return `<div class="details" id="details" role="region" aria-label="${esc("Details: " + n.s.name)}" style="--c:${n.color}">${nodeInfo(n, true)}${subs}${shells}</div>`;
+  // The app shows the app of a session: a URL for the Copilot app, the editor of a VS Code chat, or the process of the session.
+  const jump = "jump" in (document.body.dataset || {}) && (n.s.surface === "Copilot app" || n.s.kind === "vscode-chat" || n.s.pid > 0)
+    ? `<button type="button" class="jump" data-id="jump:${esc(n.s.id)}" data-session="${esc(n.s.id)}">Show app</button>` : "";
+  return `<div class="details" id="details" role="region" aria-label="${esc("Details: " + n.s.name)}" style="--c:${n.color}">${jump}${nodeInfo(n, true)}${subs}${shells}</div>`;
+}
+// showApp asks the app to show the app of a session.
+function showApp(btn) {
+  fetch("api/jump?session=" + encodeURIComponent(btn.dataset.session), { method: "POST" })
+    .then((r) => { if (!r.ok) throw r; })
+    .catch(() => { btn.textContent = "App not found"; });
 }
 function renderSidebar(snap, sessions, force) {
   sidebarArgs = [snap, sessions];
@@ -761,6 +774,7 @@ function renderSidebar(snap, sessions, force) {
       el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.click(); } };
     }
     for (const el of list.querySelectorAll(".details details")) el.ontoggle = () => { if (el.open) openSubs.add(el.dataset.sub); else openSubs.delete(el.dataset.sub); };
+    for (const el of list.querySelectorAll(".details .jump")) el.onclick = () => showApp(el);
   }, force);
 
   const evs = [];

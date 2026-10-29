@@ -579,12 +579,15 @@ func (a *winApp) jump(i int) {
 		t = a.waits[i]
 	}
 	a.mu.Unlock()
-	if !ok {
+	if !ok || !showTarget(t) {
 		a.show()
-		return
 	}
+}
+
+// showTarget shows the app of a session. It reports false if it finds no app.
+func showTarget(t jumpTarget) bool {
 	if t.url != "" && shellOpen(t.url) == nil {
-		return
+		return true
 	}
 	if exe := editorExe(t.editor); exe != "" {
 		// Without a path, VS Code on Windows opens a new empty window. --reuse-window shows the last active window instead.
@@ -594,14 +597,14 @@ func (a *winApp) jump(i int) {
 		}
 		if cmd := exec.Command(exe, args...); cmd.Start() == nil {
 			go func() { _ = cmd.Wait() }()
-			return
+			return true
 		}
 	}
 	if h := windowOf(t.pid); h != 0 {
 		activate(h)
-		return
+		return true
 	}
-	a.show()
+	return false
 }
 
 func (a *winApp) closeWindow() {

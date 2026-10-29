@@ -391,9 +391,13 @@ static NSRunningApplication *appOf(pid_t pid) {
 	return nil;
 }
 
-// jump shows the session of a menu item. The fields are: title, URL, PID, folder, and bundle ID.
+// jump shows the session of a menu item.
 - (void)jump:(NSMenuItem *)sender {
-	NSArray<NSString *> *f = sender.representedObject;
+	[self jumpTo:sender.representedObject];
+}
+
+// jumpTo shows the app of a session. The fields are: title, URL, PID, folder, and bundle ID.
+- (void)jumpTo:(NSArray<NSString *> *)f {
 	NSWorkspace *ws = NSWorkspace.sharedWorkspace;
 	if (f[1].length) {
 		NSURL *u = [NSURL URLWithString:f[1]];
@@ -465,6 +469,15 @@ static void radarQuit(void) {
 		[NSApp terminate:nil];
 	});
 }
+
+// radarJump shows the app of a session. record is a jump target record. The function copies it before it returns.
+static void radarJump(const char *record) {
+	NSArray<NSString *> *f = [[NSString stringWithUTF8String:record] componentsSeparatedByString:@"\t"];
+	if (f.count < 5) return;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		[radar jumpTo:f];
+	});
+}
 */
 import "C"
 
@@ -495,6 +508,13 @@ func setTray(state []byte) {
 	cw := C.CString(strings.Join(waits, "\n"))
 	defer C.free(unsafe.Pointer(cw))
 	C.radarSetStatus(C.int(st.working), C.int(st.waiting), cs, cw)
+}
+
+func showTarget(t jumpTarget) bool {
+	cr := C.CString(t.record())
+	defer C.free(unsafe.Pointer(cr))
+	C.radarJump(cr)
+	return true
 }
 
 // Run shows the menu bar item and the radar window. It returns only when the app quits.
