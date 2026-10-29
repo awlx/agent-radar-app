@@ -368,12 +368,16 @@ static pid_t parentOf(pid_t pid) {
 	return kp.kp_eproc.e_ppid;
 }
 
+// bringToFront shows a running app through Launch Services.
+// macOS 14 and later ignore a direct activation from a menu bar app, because such an app is not active.
 static void bringToFront(NSRunningApplication *app) {
-	if (@available(macOS 14.0, *)) {
-		[app activateFromApplication:NSRunningApplication.currentApplication options:NSApplicationActivateAllWindows];
-	} else {
-		[app activateWithOptions:NSApplicationActivateAllWindows];
+	if (app.bundleURL) {
+		NSWorkspaceOpenConfiguration *cfg = [NSWorkspaceOpenConfiguration configuration];
+		cfg.activates = YES;
+		[NSWorkspace.sharedWorkspace openApplicationAtURL:app.bundleURL configuration:cfg completionHandler:nil];
+		return;
 	}
+	[app activateWithOptions:NSApplicationActivateAllWindows];
 }
 
 // appOf finds the app that shows a process. It walks up the parent processes,

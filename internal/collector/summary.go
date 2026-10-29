@@ -50,7 +50,7 @@ func Summarize(snap *Snapshot, activeOnly bool) summary {
 		for _, s := range sessions {
 			for _, c := range sessionRoots(s) {
 				for _, f := range i.Folders {
-					if inFolder(c, f) {
+					if InFolder(c, f) {
 						inUse = true
 					}
 				}
