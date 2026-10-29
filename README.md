@@ -143,6 +143,7 @@ A click on a session that waits shows the related app:
 - A Copilot app session opens in the Copilot app.
 - A VS Code chat opens the folder of the chat in its editor. This shows the correct editor window.
 - A VS Code agent session opens the closest workspace folder that contains the folder of the session, in its editor.
+- For a multi-root window, the editor opens the saved `.code-workspace` file of the window instead. If you did not save the workspace, the editor only comes to the front, because a folder of the window would open in a new window.
 - A Copilot CLI session shows the terminal app that runs the CLI. On macOS, a different window of that app can be in front.
 
 The menu also has these commands:

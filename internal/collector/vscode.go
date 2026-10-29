@@ -80,6 +80,7 @@ type vscodeEntry struct {
 	llm         []Flow
 	folder      string
 	folders     []string
+	workspace   string // the saved .code-workspace file of the window, or ""
 	mtime       int64
 }
 
@@ -876,7 +877,7 @@ func deriveVSCodeChat(file string, e *vscodeEntry, editor string, mtime, now int
 	flows = append(flows, recentFlows(e.llm, now)...)
 	return &Session{
 		Kind: "vscode-chat", ID: reJSONLExt.ReplaceAllString(filepath.Base(file), ""), Surface: editor + " chat", Live: true,
-		Name: trunc(name, 90), Cwd: e.folder, Folders: e.folders, Repo: repo, Model: model, Busy: busy, Waiting: waiting, LastEventAt: mtime,
+		Name: trunc(name, 90), Cwd: e.folder, Folders: e.folders, Workspace: e.workspace, Repo: repo, Model: model, Busy: busy, Waiting: waiting, LastEventAt: mtime,
 		LastUser: trunc(lastText, 200), LastAssistant: trunc(lastAssistant, 240), Intent: intent,
 		RunningTools: runningTools, Subagents: subagents, Flows: flows, Peers: []Peer{},
 		Tokens: tokens, ModelTokens: modelTokens,
@@ -960,48 +961,51 @@ func stripJSONC(b []byte) []byte {
 }
 
 // workspaceRoots gives the root folders of a VS Code window. A multi-root window refers to a
-// .code-workspace file.
-func workspaceRoots(wsDir string) []string {
+// .code-workspace file. saved is that file if the user saved it. VS Code can open a saved file to
+// show the window again, but not the workspace.json of an unsaved ("untitled") workspace.
+func workspaceRoots(wsDir string) (roots []string, saved string) {
 	b, err := os.ReadFile(filepath.Join(wsDir, "workspace.json"))
 	if err != nil {
-		return nil
+		return nil, ""
 	}
 	var w map[string]any
 	if json.Unmarshal(b, &w) != nil {
-		return nil
+		return nil, ""
 	}
 	if truthy(w["folder"]) {
 		raw := str(w["folder"])
 		if strings.HasPrefix(raw, "file:") {
 			if p := fileURIPath(raw); p != "" {
-				return []string{p}
+				return []string{p}, ""
 			}
-			return nil
+			return nil, ""
 		}
 		if u, err := url.PathUnescape(raw); err == nil && u != "" {
-			return []string{u}
+			return []string{u}, ""
 		}
-		return nil
+		return nil, ""
 	}
 	raw := str(w["workspace"])
 	if !strings.HasPrefix(raw, "file:") {
-		return nil
+		return nil, ""
 	}
 	file := fileURIPath(raw)
 	if file == "" {
-		return nil
+		return nil, ""
 	}
 	cb, err := os.ReadFile(file)
 	if err != nil {
-		return nil
+		return nil, ""
 	}
 	var cfg struct {
 		Folders []map[string]any `json:"folders"`
 	}
 	if json.Unmarshal(stripJSONC(cb), &cfg) != nil {
-		return nil
+		return nil, ""
 	}
-	var roots []string
+	if strings.HasSuffix(file, ".code-workspace") {
+		saved = file
+	}
 	for _, f := range cfg.Folders {
 		if p, ok := f["path"].(string); ok {
 			p = filepath.FromSlash(p)
@@ -1015,7 +1019,7 @@ func workspaceRoots(wsDir string) []string {
 			}
 		}
 	}
-	return roots
+	return roots, saved
 }
 
 // chatCandidate is one chat file for a session ID.
@@ -1093,7 +1097,7 @@ func (c *Collector) collectVSCodeChats(now int64) []*Session {
 		if e == nil {
 			e = &vscodeEntry{}
 			if cand.wsDir != "" {
-				e.folders = workspaceRoots(cand.wsDir)
+				e.folders, e.workspace = workspaceRoots(cand.wsDir)
 				if len(e.folders) > 0 {
 					e.folder = e.folders[0]
 				}
