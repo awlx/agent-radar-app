@@ -124,36 +124,75 @@ func shortCount(n int64) string {
 	return fmt.Sprint(n)
 }
 
+// radarState is the part of the JSON state of the radar that the app uses.
+type radarState struct {
+	Sessions []radarSession `json:"sessions"`
+	IDEs     []struct {
+		IDE       string   `json:"ide"`
+		Folders   []string `json:"folders"`
+		Workspace string   `json:"workspace"`
+	} `json:"ides"`
+}
+
+type radarSession struct {
+	Kind      string   `json:"kind"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Surface   string   `json:"surface"`
+	Cwd       string   `json:"cwd"`
+	Folders   []string `json:"folders"`
+	Workspace string   `json:"workspace"`
+	PID       int      `json:"pid"`
+	Model     string   `json:"model"`
+	Busy      bool     `json:"busy"`
+	Waiting   bool     `json:"waiting"`
+	Flows     []struct {
+		Sink    string `json:"sink"`
+		Model   string `json:"model"`
+		AgentID string `json:"agentId"`
+		Tokens  int64  `json:"tokens"`
+	} `json:"flows"`
+}
+
+// target gives the jump target of a session.
+func (snap *radarState) target(s *radarSession) jumpTarget {
+	t := jumpTo(s.Kind, s.ID, s.Surface, s.Name, s.Cwd, s.Workspace, s.Folders, s.PID)
+	if s.Surface == "VS Code agent" {
+		// The session belongs to the editor window that has its folder open.
+		// The longest folder wins: a window for /repo/sub is closer than a window for /repo.
+		best := -1
+		for _, ide := range snap.IDEs {
+			for _, f := range ide.Folders {
+				if ideEditors[ide.IDE] != "" && collector.InFolder(s.Cwd, f) && len(f) > best {
+					best, t.editor, t.folder = len(f), ideEditors[ide.IDE], windowPath(ide.Folders, ide.Workspace)
+				}
+			}
+		}
+	}
+	return t
+}
+
+// Jump shows the app of the session with the ID in the JSON state.
+// It reports false if the state has no such session, or if the app is unknown.
+func Jump(state []byte, id string) bool {
+	var snap radarState
+	if id == "" || json.Unmarshal(state, &snap) != nil {
+		return false
+	}
+	for i := range snap.Sessions {
+		if s := &snap.Sessions[i]; s.ID == id {
+			t := snap.target(s)
+			return (t.url != "" || t.editor != "" || t.pid > 0) && showTarget(t)
+		}
+	}
+	return false
+}
+
 // statusOf gives the counts of active sessions and the models that they use.
 // A model is in use when an active session or its sub-agent called it in the last 2 minutes.
 // An active session without a recent model call counts for its current model.
 func statusOf(state []byte) trayStatus {
-	var snap struct {
-		Sessions []struct {
-			Kind      string   `json:"kind"`
-			ID        string   `json:"id"`
-			Name      string   `json:"name"`
-			Surface   string   `json:"surface"`
-			Cwd       string   `json:"cwd"`
-			Folders   []string `json:"folders"`
-			Workspace string   `json:"workspace"`
-			PID       int      `json:"pid"`
-			Model     string   `json:"model"`
-			Busy      bool     `json:"busy"`
-			Waiting   bool     `json:"waiting"`
-			Flows     []struct {
-				Sink    string `json:"sink"`
-				Model   string `json:"model"`
-				AgentID string `json:"agentId"`
-				Tokens  int64  `json:"tokens"`
-			} `json:"flows"`
-		} `json:"sessions"`
-		IDEs []struct {
-			IDE       string   `json:"ide"`
-			Folders   []string `json:"folders"`
-			Workspace string   `json:"workspace"`
-		} `json:"ides"`
-	}
+	var snap radarState
 	var st trayStatus
 	if json.Unmarshal(state, &snap) != nil {
 		return st
@@ -183,20 +222,7 @@ func statusOf(state []byte) trayStatus {
 	for _, s := range snap.Sessions {
 		if s.Waiting {
 			st.waiting++
-			t := jumpTo(s.Kind, s.ID, s.Surface, s.Name, s.Cwd, s.Workspace, s.Folders, s.PID)
-			if s.Surface == "VS Code agent" {
-				// The session belongs to the editor window that has its folder open.
-				// The longest folder wins: a window for /repo/sub is closer than a window for /repo.
-				best := -1
-				for _, ide := range snap.IDEs {
-					for _, f := range ide.Folders {
-						if ideEditors[ide.IDE] != "" && collector.InFolder(s.Cwd, f) && len(f) > best {
-							best, t.editor, t.folder = len(f), ideEditors[ide.IDE], windowPath(ide.Folders, ide.Workspace)
-						}
-					}
-				}
-			}
-			st.waits = append(st.waits, t)
+			st.waits = append(st.waits, snap.target(&s))
 		} else if s.Busy {
 			st.working++
 		} else {

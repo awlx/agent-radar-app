@@ -177,6 +177,25 @@ test("empty snapshots and wide layouts remain finite and bounded", () => {
   }
 });
 
+test("the details offer Show app only when the app can show the session", () => {
+  const { api, elements } = graph(1000, 500, true);
+  const s = session("one");
+  s.pid = 42;
+  const button = () => elements.get("list").innerHTML.match(/<button[^>]*class="jump"[^>]*>/)?.[0];
+  api.build(snapshot(s));
+  api.toggleSelect(api.nodes.get("s:one"));
+  assert.equal(button(), undefined);
+  elements.get("body").dataset = { jump: "" };
+  api.build(snapshot(s));
+  assert.match(button(), /data-session="one"/);
+  s.pid = 0;
+  api.build(snapshot(s));
+  assert.equal(button(), undefined);
+  s.surface = "Copilot app";
+  api.build(snapshot(s));
+  assert.match(button(), /data-session="one"/);
+});
+
 test("background shells stay visible under idle or disconnected owners without becoming agents", () => {
   const { api, elements, labels } = graph(1000, 500, true);
   const s = session("owner", 1);

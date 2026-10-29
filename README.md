@@ -119,7 +119,7 @@ These operating systems are supported:
 - A moving dot shows each new message between sessions.
 - A live feed of the data flows, with the tool and the command of each flow.
 - The model tokens for each model. This includes models that you configure with your own key (BYOK).
-- A side panel with the details of the selected item.
+- A side panel with the details of the selected item. In the app, the details of a session have a **Show app** button.
 - A status icon in the macOS menu bar or in the Windows notification area.
 - A JSON summary for scripts and for AI agents.
 
@@ -164,6 +164,9 @@ A click on a session that waits shows the related app:
 - A VS Code agent session opens the closest workspace folder that contains the folder of the session, in its editor.
 - For a multi-root window, the editor opens the saved `.code-workspace` file of the window instead. If you did not save the workspace, the editor only comes to the front, because a folder of the window would open in a new window.
 - A Copilot CLI session shows the terminal app that runs the CLI. On macOS, a different window of that app can be in front.
+
+In the radar window, click a session to show its details. The **Show app** button in the details shows the app of the session in the same way.
+The button is only in the app. It is not available in `-demo` mode or with a LAN address.
 
 The menu also has these commands:
 
@@ -295,6 +298,7 @@ Do not give the output of these endpoints to other persons or to an AI model.
 | `/state` | The full snapshot as JSON. |
 | `/events` | The snapshot as server-sent events. |
 | `/api/snapshot` | A short JSON summary of the active agents. Add `?all=1` to include idle sessions. |
+| `/api/jump?session=<id>` | `POST` only. Shows the app of a session. Only the app has this path, and only on a loopback address. |
 | `/healthz` | A health check. This path does not need a token. |
 
 ## Project layout

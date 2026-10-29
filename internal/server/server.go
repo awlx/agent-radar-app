@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -121,11 +122,29 @@ func (h *Hub) Unsubscribe(ch chan []byte) {
 
 // ---- HTTP ----
 
-func NewHandler(h *Hub, token string, loopback bool) http.Handler {
+// NewHandler gives the HTTP handler of the radar. If jump is set, the UI can ask the app to show
+// the app of a session: jump gets the JSON state and the ID of the session.
+func NewHandler(h *Hub, token string, loopback bool, jump func(state []byte, id string) bool) http.Handler {
 	mux := http.NewServeMux()
+	page := uiHTML
+	if jump != nil {
+		page = bytes.Replace(uiHTML, []byte("<body>"), []byte("<body data-jump>"), 1)
+		mux.HandleFunc("POST /api/jump", func(w http.ResponseWriter, r *http.Request) {
+			// Browsers send Origin with each POST, and secure checks it. A request without Origin is not from the UI.
+			if r.Header.Get("Origin") == "" {
+				http.Error(w, "forbidden origin", http.StatusForbidden)
+				return
+			}
+			if !jump(h.State(), r.URL.Query().Get("session")) {
+				http.Error(w, "no app for this session", http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+	}
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(uiHTML)
+		_, _ = w.Write(page)
 	})
 	mux.HandleFunc("GET /state", func(w http.ResponseWriter, r *http.Request) {
 		b := h.State()

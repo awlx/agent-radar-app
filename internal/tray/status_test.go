@@ -71,6 +71,15 @@ func TestJumpTargets(t *testing.T) {
 	}
 }
 
+func TestJumpRejects(t *testing.T) {
+	state := []byte(`{"sessions":[{"kind":"copilot","id":"gone","surface":"Copilot CLI","cwd":"/cli"}]}`)
+	for _, c := range []struct{ state, id string }{{string(state), ""}, {string(state), "missing"}, {string(state), "gone"}, {"x", "gone"}} {
+		if Jump([]byte(c.state), c.id) {
+			t.Errorf("Jump(%q, %q) = true", c.state, c.id)
+		}
+	}
+}
+
 func TestModelIDAndDisplayNameMerge(t *testing.T) {
 	state := `{"sessions":[
 		{"id":"a","busy":true,"model":"claude-opus-5.5","flows":[{"sink":"LLM: Claude Opus 5.5","model":"Claude Opus 5.5","tokens":100}]},
