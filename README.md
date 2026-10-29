@@ -73,7 +73,7 @@ Agent Radar reads the local session files of these products:
 
 | Product | What the radar shows | Status |
 |---------|----------------------|--------|
-| [GitHub Copilot app](https://github.com/features/copilot) (desktop app) | The sessions, the sub-agents, the tools, the data flows, and the model tokens. | Supported |
+| [GitHub Copilot app](https://docs.github.com/en/copilot/concepts/copilot-surfaces/github-copilot-app) (desktop app) | The sessions, the sub-agents, the tools, the data flows, and the model tokens. | Supported |
 | [GitHub Copilot CLI](https://github.com/github/copilot-cli) | The sessions, the sub-agents, the tools, the data flows, and the model tokens. | Supported |
 | Copilot CLI sessions that VS Code starts ("VS Code agent") | The same data as for the Copilot CLI. | Supported |
 | [Visual Studio Code](https://code.visualstudio.com) and VS Code Insiders, with GitHub Copilot Chat | The chat sessions, the tools, the data flows, and the model tokens. | Supported |
@@ -91,31 +91,22 @@ These operating systems are supported:
 
 ## Features
 
-- A map of the agents. The map shows the surface, the sessions, the sub-agents, and the data destinations.
-- Sub-agents use diamond markers and sit beneath their parent in a bordered group, with their status and current task below the name. Narrow windows scroll the map instead of squeezing its labels. Select a marker for full details in the side panel.
-- Created child sessions stay nested beneath their creator with solid ownership links, even when the creation is old. Available idle ancestors remain visible as "Idle parent context" while a descendant works. Each newly observed session message travels once as a dot along the existing ownership path; no extra message line or history replay is drawn. Reduced motion uses a brief stationary indication at the receiver. Message details remain in the feed. Child sessions keep circular markers, sub-agents use diamonds, and detached background shells use squares.
-- Background sub-agents can resume after their first completed task. The map follows their later turns and tool activity under the same identity. Turn on "show idle / completed" to see all recorded completed sub-agents of the collected sessions, not just recent completions.
-- Detached background shells use square markers beneath their owning session, with a separate count and process details. They remain visible when the agent is idle or disconnected and are not counted as working agents or sub-agents.
+- A map of the agents. The map shows the surfaces, the sessions, the sub-agents, and the data destinations.
+- Different markers for each type of item:
+  - Circle: a session or a child session.
+  - Diamond: a sub-agent.
+  - Square: a detached background shell.
+- Child sessions show below the session that created them.
+- A moving dot shows each new message between sessions.
 - A live feed of the data flows, with the tool and the command of each flow.
 - The model tokens for each model. This includes models that you configure with your own key (BYOK).
-- A side panel with the prompt, the folder, the model, and the sub-agents of the selected session.
+- A side panel with the details of the selected item.
 - A status icon in the macOS menu bar or in the Windows notification area.
 - A JSON summary for scripts and for AI agents.
 
-VS Code does not record model calls. For VS Code chat sessions, the token panel shows "–" for calls.
-If the panel adds known calls to VS Code usage, the number has a "+" after it.
-
-The group "Local machine" contains only destinations that keep the data on this computer.
-The group "Tools & services" can contain local tools and remote services.
-Shell, build, and container commands are in this group, because they can send data to remote systems.
-The name of an MCP destination is the name of the MCP server.
-If the radar cannot find the server name, the destination is "MCP: unknown server".
 If the operating system is set to reduce motion, the UI does not show animations.
 
-Background shells are discovered from `session-state/*/detached-shells/*.json` in the Copilot home directory.
-Radar checks the supervisor process, not the age of its owner's heartbeat; on Linux it also verifies the boot ID and process start time to reject stale records and reused PIDs.
-Only detached shells with this metadata are shown. An ordinary asynchronous shell without persistent process metadata cannot be reliably rediscovered after its tool call returns.
-The JSON summary includes background shell IDs, PIDs, and start times, never their command lines or logs. A session with only background shells retains its agent's `idle` status.
+For more information about the map, the destinations, and the background shells, refer to [How Agent Radar works](docs/how-it-works.md).
 
 ## Use the app
 
@@ -297,6 +288,7 @@ Do not give the output of these endpoints to other persons or to an AI model.
 | `macos` | The `Info.plist` file, the icon generator, and the build script of the macOS app. |
 | `windows` | The build script of the Windows app. |
 | `scripts` | The script that builds the release files. |
+| `docs` | More documentation. |
 | `docs/images` | The screenshots. |
 
 ## Development
