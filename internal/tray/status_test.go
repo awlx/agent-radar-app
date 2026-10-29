@@ -33,7 +33,7 @@ func TestJumpTargets(t *testing.T) {
 		{"kind":"copilot","id":"agent","name":"Agent","surface":"VS Code agent","cwd":"/repo/sub","pid":9,"waiting":true},
 		{"kind":"copilot","id":"lost","name":"Lost","surface":"VS Code agent","cwd":"/elsewhere","pid":9,"waiting":true},
 		{"kind":"copilot","id":"busy","surface":"Copilot CLI","busy":true}],
-		"ides":[{"ide":"Some IDE","folders":["/repo"]},{"ide":"Visual Studio Code - Insiders","folders":["/other","/repo"]}]}`))
+		"ides":[{"ide":"Some IDE","folders":["/repo"]},{"ide":"Visual Studio Code","folders":["/repo"]},{"ide":"Visual Studio Code - Insiders","folders":["/other","/repo/sub"]}]}`))
 	if len(st.waits) != 5 {
 		t.Fatalf("waits: %v", st.waits)
 	}
@@ -46,7 +46,7 @@ func TestJumpTargets(t *testing.T) {
 	if got := st.waits[2].record(); got != "Chat — Code - Insiders chat\t\t0\t/w\tcom.microsoft.VSCodeInsiders" {
 		t.Fatalf("vscode: %q", got)
 	}
-	if got := st.waits[3].record(); got != "Agent — VS Code agent\t\t9\t/repo\tcom.microsoft.VSCodeInsiders" {
+	if got := st.waits[3].record(); got != "Agent — VS Code agent\t\t9\t/repo/sub\tcom.microsoft.VSCodeInsiders" {
 		t.Fatalf("vscode agent: %q", got)
 	}
 	if got := st.waits[4].record(); got != "Lost — VS Code agent\t\t9\t/elsewhere\t" {

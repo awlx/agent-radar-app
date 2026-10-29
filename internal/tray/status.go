@@ -174,12 +174,11 @@ func statusOf(state []byte) trayStatus {
 			t := jumpTo(s.Kind, s.ID, s.Surface, s.Name, s.Cwd, s.Folders, s.PID)
 			if s.Surface == "VS Code agent" {
 				// The session belongs to the editor window that has its folder open.
-			find:
+				// The longest folder wins: a window for /repo/sub is closer than a window for /repo.
 				for _, ide := range snap.IDEs {
 					for _, f := range ide.Folders {
-						if ideEditors[ide.IDE] != "" && collector.InFolder(s.Cwd, f) {
+						if ideEditors[ide.IDE] != "" && collector.InFolder(s.Cwd, f) && (t.editor == "" || len(f) > len(t.folder)) {
 							t.editor, t.folder = ideEditors[ide.IDE], f
-							break find
 						}
 					}
 				}
