@@ -5,7 +5,7 @@ package demo
 import (
 	"time"
 
-	"github.com/awlx/copilot-radar/internal/collector"
+	"github.com/awlx/agent-radar-app/internal/collector"
 )
 
 // Source gives a new mock snapshot for each call. The flows move with the time, so that the UI shows activity.

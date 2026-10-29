@@ -22,7 +22,7 @@ import (
 
 const Supported = true
 
-const appName = "Copilot Radar"
+const appName = "Agent Radar"
 
 var (
 	user32                         = windows.NewLazySystemDLL("user32.dll")
@@ -63,11 +63,15 @@ const (
 	swpNoActive = 0x0010
 	mbIconInfo  = 0x40
 
-	settingsKey = `Software\Copilot Radar`
+	settingsKey = `Software\Agent Radar`
 	runKey      = `Software\Microsoft\Windows\CurrentVersion\Run`
 	themeKey    = `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`
 	stayValue   = "StayInForeground"
 	maxRows     = 8 // the maximum number of sessions and of models in the menu
+
+	// The names from before the rename. migrateLegacy moves their settings.
+	legacyName        = "Copilot Radar"
+	legacySettingsKey = `Software\Copilot Radar`
 )
 
 // call calls a Windows function if it exists. Old Windows versions do not have all the functions.
@@ -84,7 +88,7 @@ func utf16(s string) uintptr {
 	return uintptr(unsafe.Pointer(p))
 }
 
-// dataDir is the folder for the log file and the WebView2 data: %LOCALAPPDATA%\Copilot Radar.
+// dataDir is the folder for the log file and the WebView2 data: %LOCALAPPDATA%\Agent Radar.
 func dataDir() string {
 	base, err := os.UserCacheDir()
 	if err != nil {
@@ -100,7 +104,7 @@ func init() {
 	}
 	dir := dataDir()
 	_ = os.MkdirAll(dir, 0o700)
-	f, err := os.OpenFile(filepath.Join(dir, "copilot-radar.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(filepath.Join(dir, "agent-radar.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return
 	}
@@ -163,6 +167,34 @@ func setStartAtLogin(on bool) {
 		return
 	}
 	_ = k.SetStringValue(appName, `"`+exe+`" -background`)
+}
+
+// migrateLegacy moves the settings of the app from before the rename ("Copilot Radar").
+// A login entry for the old app then starts this app.
+func migrateLegacy() {
+	if old, err := registry.OpenKey(registry.CURRENT_USER, legacySettingsKey, registry.QUERY_VALUE); err == nil {
+		v, _, err := old.GetIntegerValue(stayValue)
+		old.Close()
+		if err == nil {
+			if k, err := registry.OpenKey(registry.CURRENT_USER, settingsKey, registry.QUERY_VALUE); err == nil {
+				k.Close()
+			} else {
+				setRegBool(stayValue, v != 0)
+			}
+		}
+		_ = registry.DeleteKey(registry.CURRENT_USER, legacySettingsKey)
+	}
+	k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.QUERY_VALUE|registry.SET_VALUE)
+	if err != nil {
+		return
+	}
+	defer k.Close()
+	if v, _, err := k.GetStringValue(legacyName); err == nil {
+		_ = k.DeleteValue(legacyName)
+		if v != "" {
+			setStartAtLogin(true)
+		}
+	}
 }
 
 // inkOf gives the color of the radar for the taskbar: dark on a light taskbar, and white on a dark taskbar.
@@ -355,7 +387,7 @@ func (a *winApp) buildMenu() {
 		a.applyStay()
 	})
 	onClick(systray.AddMenuItem("Open in Browser", ""), func() { _ = shellOpen(a.url) })
-	a.login = systray.AddMenuItemCheckbox("Start at Login", "Start Copilot Radar with the tray icon when you log in", startsAtLogin())
+	a.login = systray.AddMenuItemCheckbox("Start at Login", "Start Agent Radar with the tray icon when you log in", startsAtLogin())
 	onClick(a.login, func() {
 		setStartAtLogin(!startsAtLogin())
 		if startsAtLogin() {
@@ -366,7 +398,7 @@ func (a *winApp) buildMenu() {
 	})
 	systray.AddSeparator()
 	systray.AddMenuItem(appName+" "+a.version, "").Disable()
-	onClick(systray.AddMenuItem("Quit Copilot Radar", ""), systray.Quit)
+	onClick(systray.AddMenuItem("Quit Agent Radar", ""), systray.Quit)
 }
 
 func (a *winApp) update(state []byte) {
@@ -582,19 +614,20 @@ func (a *winApp) closeWindow() {
 
 // Run shows the tray icon and the radar window. It returns only when the app quits.
 func Run(ctx context.Context, opt Options, h Source) {
-	mutex, err := windows.CreateMutex(nil, false, windows.StringToUTF16Ptr(`Local\CopilotRadarApp`))
+	mutex, err := windows.CreateMutex(nil, false, windows.StringToUTF16Ptr(`Local\AgentRadarApp`))
 	if errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
-		// Another Copilot Radar app runs. Show its window, or tell the user where its icon is.
+		// Another Agent Radar app runs. Show its window, or tell the user where its icon is.
 		if w := call(pFindWindow, utf16("webview"), utf16(appName)); w != 0 {
 			activate(w)
 		} else {
-			call(pMessageBox, 0, utf16("Copilot Radar is already running. Use its icon in the notification area of the taskbar."), utf16(appName), mbIconInfo)
+			call(pMessageBox, 0, utf16("Agent Radar is already running. Use its icon in the notification area of the taskbar."), utf16(appName), mbIconInfo)
 		}
 		return
 	}
 	if mutex != 0 {
 		defer windows.CloseHandle(mutex)
 	}
+	migrateLegacy()
 	call(pSetProcessDpiAwarenessContext, ^uintptr(3)) // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 	_ = os.Setenv("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "FF0D1217")
 

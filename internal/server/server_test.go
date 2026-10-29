@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/awlx/copilot-radar/internal/collector"
+	"github.com/awlx/agent-radar-app/internal/collector"
 )
 
 type snapshotSource struct{ snapshot *collector.Snapshot }

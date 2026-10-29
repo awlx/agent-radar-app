@@ -16,20 +16,20 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/awlx/copilot-radar/internal/collector"
-	"github.com/awlx/copilot-radar/internal/demo"
-	"github.com/awlx/copilot-radar/internal/server"
-	"github.com/awlx/copilot-radar/internal/tray"
+	"github.com/awlx/agent-radar-app/internal/collector"
+	"github.com/awlx/agent-radar-app/internal/demo"
+	"github.com/awlx/agent-radar-app/internal/server"
+	"github.com/awlx/agent-radar-app/internal/tray"
 )
 
 var version = "dev"
 
-// appBuild is "true" in the Windows app build ("Copilot Radar.exe"). The app build starts in app mode.
+// appBuild is "true" in the Windows app build ("Agent Radar.exe"). The app build starts in app mode.
 var appBuild = ""
 
 func main() {
 	listen := flag.String("listen", "127.0.0.1:47900", "address to listen on. Use 0.0.0.0:47900 to expose on the LAN")
-	token := flag.String("token", os.Getenv("COPILOT_RADAR_TOKEN"), "access token for non-loopback listeners (default: random, printed at start)")
+	token := flag.String("token", envToken(), "access token for non-loopback listeners (default: random, printed at start)")
 	noAuth := flag.Bool("no-auth", false, "disable the token check on non-loopback listeners (not recommended)")
 	poll := flag.Duration("poll", 2*time.Second, "poll interval")
 	snapshot := flag.Bool("snapshot", false, "print a JSON summary of the agents and exit")
@@ -81,7 +81,7 @@ func main() {
 	}
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil && appMode && !listenSet {
-		// Another copilot-radar can use the default port. The app then uses a free port.
+		// Another agent-radar can use the default port. The app then uses a free port.
 		ln, err = net.Listen("tcp", net.JoinHostPort(host, "0"))
 	}
 	if err != nil {
@@ -117,6 +117,14 @@ func main() {
 	}
 }
 
+// envToken reads AGENT_RADAR_TOKEN, or COPILOT_RADAR_TOKEN from before the rename.
+func envToken() string {
+	if t := os.Getenv("AGENT_RADAR_TOKEN"); t != "" {
+		return t
+	}
+	return os.Getenv("COPILOT_RADAR_TOKEN")
+}
+
 // localURL is the URL for the app window. The window always connects through the loopback address.
 func localURL(port, token string) string {
 	u := "http://127.0.0.1:" + port + "/"
@@ -126,7 +134,7 @@ func localURL(port, token string) string {
 	return u
 }
 
-// inAppBundle reports whether the binary runs from Copilot Radar.app.
+// inAppBundle reports whether the binary runs from Agent Radar.app.
 func inAppBundle() bool {
 	exe, err := os.Executable()
 	return err == nil && strings.Contains(exe, ".app/Contents/MacOS/")
@@ -156,7 +164,7 @@ func printURLs(host, port, token string, loopback bool) {
 		if strings.Contains(h, ":") {
 			h = "[" + h + "]"
 		}
-		log.Printf("copilot-radar %s: http://%s:%s%s", version, h, port, q)
+		log.Printf("agent-radar %s: http://%s:%s%s", version, h, port, q)
 	}
 	if !loopback && token != "" {
 		log.Printf("Open the URL with the token one time. The browser then keeps a cookie.")

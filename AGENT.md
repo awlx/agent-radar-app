@@ -1,6 +1,6 @@
 # AGENT.md
 
-This file tells an AI agent how to install, start, and remove `copilot-radar` for a user.
+This file tells an AI agent how to install, start, and remove `agent-radar` for a user.
 
 ## Install
 
@@ -8,15 +8,15 @@ This file tells an AI agent how to install, start, and remove `copilot-radar` fo
 2. Install the binary:
 
    ```sh
-   go install github.com/awlx/copilot-radar/cmd/copilot-radar@latest
+   go install github.com/awlx/agent-radar-app/cmd/agent-radar@latest
    ```
 
 3. If `go install` cannot get the module, build from the source:
 
    ```sh
-   git clone https://github.com/awlx/copilot-radar /tmp/copilot-radar-src
-   cd /tmp/copilot-radar-src && go build -o "$(go env GOPATH)/bin/copilot-radar" ./cmd/copilot-radar
-   rm -rf /tmp/copilot-radar-src
+   git clone https://github.com/awlx/agent-radar-app /tmp/agent-radar-src
+   cd /tmp/agent-radar-src && go build -o "$(go env GOPATH)/bin/agent-radar" ./cmd/agent-radar
+   rm -rf /tmp/agent-radar-src
    ```
 
 4. Make sure that `$(go env GOPATH)/bin` is in the `PATH` of the user.
@@ -26,7 +26,7 @@ This file tells an AI agent how to install, start, and remove `copilot-radar` fo
 1. Start the server in the background:
 
    ```sh
-   copilot-radar
+   agent-radar
    ```
 
 2. Open http://127.0.0.1:47900 in a browser.
@@ -41,7 +41,7 @@ Do not use `-no-auth`.
 Run this command:
 
 ```sh
-copilot-radar -snapshot
+agent-radar -snapshot
 ```
 
 The output is a JSON summary of the active agents.
@@ -59,7 +59,7 @@ Do the install procedure again.
 2. Remove the binary:
 
    ```sh
-   rm "$(go env GOPATH)/bin/copilot-radar"
+   rm "$(go env GOPATH)/bin/agent-radar"
    ```
 
 ## Troubleshoot

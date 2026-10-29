@@ -1,6 +1,6 @@
 # Security
 
-Copilot Radar shows data from your agent sessions. This data can contain commands, file paths, and prompts.
+Agent Radar shows data from your agent sessions. This data can contain commands, file paths, and prompts.
 
 ## Report a vulnerability
 
@@ -9,7 +9,7 @@ Use the private vulnerability report of GitHub: open the **Security** tab of thi
 
 Give these items in the report:
 
-- The version. Run `copilot-radar -version`.
+- The version. Run `agent-radar -version`.
 - The operating system.
 - The steps that show the problem.
 
