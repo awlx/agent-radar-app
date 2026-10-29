@@ -587,9 +587,10 @@ func (a *winApp) jump(i int) {
 		return
 	}
 	if exe := editorExe(t.editor); exe != "" {
-		args := []string{}
+		// Without a path, VS Code on Windows opens a new empty window. --reuse-window shows the last active window instead.
+		args := []string{"--reuse-window"}
 		if t.folder != "" {
-			args = append(args, t.folder)
+			args = []string{t.folder}
 		}
 		if cmd := exec.Command(exe, args...); cmd.Start() == nil {
 			go func() { _ = cmd.Wait() }()
