@@ -23,7 +23,8 @@ This file tells an AI agent how to install, start, and remove `agent-radar` for 
 
 ## Start
 
-1. Start the server in the background:
+1. Start the server. The command runs in the foreground until you stop it with Ctrl+C.
+   To keep the server running, start it in a separate terminal or as a background task:
 
    ```sh
    agent-radar
