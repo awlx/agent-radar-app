@@ -294,8 +294,8 @@ func TestInFolder(t *testing.T) {
 		{"", "/a", false},
 	}
 	for _, c := range cases {
-		if got := inFolder(c.cwd, c.folder); got != c.want {
-			t.Errorf("inFolder(%q, %q) = %v", c.cwd, c.folder, got)
+		if got := InFolder(c.cwd, c.folder); got != c.want {
+			t.Errorf("InFolder(%q, %q) = %v", c.cwd, c.folder, got)
 		}
 	}
 }

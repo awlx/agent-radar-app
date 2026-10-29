@@ -160,8 +160,8 @@ func normPath(p string) string {
 	return n
 }
 
-// inFolder tells if cwd is folder or a path in folder.
-func inFolder(cwd, folder string) bool {
+// InFolder tells if cwd is folder or a path in folder.
+func InFolder(cwd, folder string) bool {
 	c, f := normPath(cwd), normPath(folder)
 	return c != "" && f != "" && (c == f || strings.HasPrefix(c, f+"/"))
 }

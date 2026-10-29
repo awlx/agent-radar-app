@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/awlx/agent-radar-app/internal/collector"
 )
 
 // Source gives the JSON state of the radar and the updates of the state.
@@ -46,6 +48,14 @@ var editorBundles = map[string]string{
 	"Code - Insiders": "com.microsoft.VSCodeInsiders",
 	"Cursor":          "com.todesktop.230313mzl4w4u92",
 	"VSCodium":        "com.vscodium",
+}
+
+// ideEditors gives the name of the data folder of a VS Code editor, by the ideName in its ~/.copilot/ide lock file.
+var ideEditors = map[string]string{
+	"Visual Studio Code":            "Code",
+	"Visual Studio Code - Insiders": "Code - Insiders",
+	"Cursor":                        "Cursor",
+	"VSCodium":                      "VSCodium",
 }
 
 func jumpTo(kind, id, surface, name, cwd string, folders []string, pid int) jumpTarget {
@@ -127,6 +137,10 @@ func statusOf(state []byte) trayStatus {
 				Tokens  int64  `json:"tokens"`
 			} `json:"flows"`
 		} `json:"sessions"`
+		IDEs []struct {
+			IDE     string   `json:"ide"`
+			Folders []string `json:"folders"`
+		} `json:"ides"`
 	}
 	var st trayStatus
 	if json.Unmarshal(state, &snap) != nil {
@@ -157,7 +171,20 @@ func statusOf(state []byte) trayStatus {
 	for _, s := range snap.Sessions {
 		if s.Waiting {
 			st.waiting++
-			st.waits = append(st.waits, jumpTo(s.Kind, s.ID, s.Surface, s.Name, s.Cwd, s.Folders, s.PID))
+			t := jumpTo(s.Kind, s.ID, s.Surface, s.Name, s.Cwd, s.Folders, s.PID)
+			if s.Surface == "VS Code agent" {
+				// The session belongs to the editor window that has its folder open.
+			find:
+				for _, ide := range snap.IDEs {
+					for _, f := range ide.Folders {
+						if ideEditors[ide.IDE] != "" && collector.InFolder(s.Cwd, f) {
+							t.editor, t.folder = ideEditors[ide.IDE], f
+							break find
+						}
+					}
+				}
+			}
+			st.waits = append(st.waits, t)
 		} else if s.Busy {
 			st.working++
 		} else {
