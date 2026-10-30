@@ -24,6 +24,15 @@
   header label { margin-left: auto; color: var(--text-color-muted, #8b949e); cursor: pointer; user-select: none; }
   header .live { width: 8px; height: 8px; border-radius: 50%; background: var(--ok, #3fb950); box-shadow: 0 0 8px var(--ok, #3fb950); animation: blink 1.6s infinite; }
   header .live.off { background: var(--bad, #f85149); box-shadow: 0 0 8px var(--bad, #f85149); animation: none; }
+  #focusScope { flex-basis: 100%; overflow-wrap: anywhere; }
+  #actionStatus { color: var(--bad, #f85149); }
+  #actionStatus:empty { display: none; }
+  #clearFocus { margin-left: 8px; }
+  #sessionMenu { position: fixed; z-index: 6; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; padding: 4px;
+    border: 1px solid var(--border-color-default, #30363d); border-radius: 8px; background: var(--background-color-default, #0d1117); box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+  #sessionMenu:not([hidden]) { display: grid; }
+  #sessionMenu button { padding: 7px 10px; text-align: left; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  #sessionMenu button:hover, #sessionMenu button:focus-visible { background: var(--border-color-default, #30363d); outline: 2px solid var(--text-color-muted, #8b949e); outline-offset: -2px; }
   @keyframes blink { 50% { opacity: .35; } }
   #stage { position: relative; min-width: 0; min-height: 0; overflow: auto; }
   canvas { width: 100%; display: block; }
@@ -60,10 +69,10 @@
   .details summary { cursor: pointer; }
   .details summary:focus-visible { outline: 2px solid var(--c, #8957e5); outline-offset: 1px; }
   .details details > div { margin-left: 14px; }
-  .details .jump { margin: 2px 0 6px; padding: 2px 10px; border: 1px solid var(--c, #8957e5); border-radius: 6px; font: inherit; cursor: pointer;
+  .details button, #clearFocus { margin: 2px 0 6px; padding: 2px 10px; border: 1px solid var(--c, #8957e5); border-radius: 6px; font: inherit; cursor: pointer;
     background: color-mix(in srgb, var(--c, #8957e5) 15%, transparent); color: var(--text-color-default, #e6edf3); }
-  .details .jump:hover { background: color-mix(in srgb, var(--c, #8957e5) 30%, transparent); }
-  .details .jump:focus-visible { outline: 2px solid var(--c, #8957e5); outline-offset: 1px; }
+  .details button:hover, #clearFocus:hover { background: color-mix(in srgb, var(--c, #8957e5) 30%, transparent); }
+  .details button:focus-visible, #clearFocus:focus-visible { outline: 2px solid var(--c, #8957e5); outline-offset: 1px; }
   .card.dest .name { color: var(--text-color-default, #e6edf3); }
   .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #6e7681; }
   .dot.busy { background: var(--ok, #3fb950); box-shadow: 0 0 6px var(--ok, #3fb950); animation: blink 1s infinite; }
@@ -121,7 +130,10 @@
   <span class="stat"><b id="sAll">0</b> sessions</span>
   <span class="stat"><b id="sFlow">0</b> flows / 2 min</span>
   <label><input type="checkbox" id="showIdle" /> show idle / completed</label>
+  <div id="focusScope" hidden><span id="focusLabel" role="status"></span> <button type="button" id="clearFocus">Show all sessions</button></div>
+  <span id="actionStatus" role="status"></span>
 </header>
+<div id="sessionMenu" role="menu" aria-label="Session actions" hidden></div>
 <div id="stage">
   <div id="graphHint" hidden>↔ Scroll to explore the full graph</div>
   <canvas id="cv" aria-hidden="true"></canvas>
@@ -200,6 +212,7 @@ resize();
 // ---------- Layout model (fixed columns, stable rows) ----------
 const nodes = new Map();
 let links = [], particles = [], snapshot = null, selected = null, hover = null;
+let focusID = null, focusName = "";
 let messagePulses = [], messageFloor = null;
 const seenMessages = new Map();
 // Only destinations that keep the data on this computer. Shell, build, and container commands can
@@ -221,7 +234,7 @@ function upsert(id, props) {
   return n;
 }
 
-function build(snap) {
+function build(snap, force = false) {
   if (!snap?.sessions) return;
   updateTheme();
   snapshot = snap;
@@ -238,14 +251,32 @@ function build(snap) {
     while (ancestor && ancestor !== id) ancestor = parentOf.get(ancestor);
     if (ancestor !== id) parentOf.set(id, s.id);
   }
+  let scopedSessions = snap.sessions;
+  if (focusID) {
+    const children = new Map(snap.sessions.map((s) => [s.id, []]));
+    for (const [id, parent] of parentOf) children.get(parent).push(id);
+    const scope = new Set(), pending = all.has(focusID) ? [focusID] : [];
+    while (pending.length) {
+      const id = pending.pop();
+      if (scope.has(id)) continue;
+      scope.add(id);
+      pending.push(...children.get(id));
+    }
+    scopedSessions = snap.sessions.filter((s) => scope.has(s.id));
+    if (all.has(focusID)) focusName = all.get(focusID).name;
+  }
+  const scoped = { ...snap, sessions: scopedSessions }, inScope = new Set(scopedSessions.map((s) => s.id));
+  document.getElementById("focusScope").hidden = !focusID;
+  document.getElementById("focusLabel").textContent = focusID
+    ? (all.has(focusID) ? "Focused on: " : "Session no longer available: ") + focusName + " (and descendants)" : "";
   const active = (s) => s.busy || s.waiting || s.backgroundShells?.length || s.subagents.some((a) => a.running);
-  const visible = new Set(snap.sessions.filter((s) => showIdle || active(s)).map((s) => s.id));
+  const visible = new Set(scopedSessions.filter((s) => s.id === focusID || showIdle || active(s)).map((s) => s.id));
   for (const id of visible) {
     const parent = parentOf.get(id);
-    if (parent) visible.add(parent);
+    if (inScope.has(parent)) visible.add(parent);
   }
-  const sessions = snap.sessions.filter((s) => visible.has(s.id))
-    .map((s) => ({ ...s, contextOnly: !showIdle && !active(s), subagents: showIdle ? s.subagents : s.subagents.filter((a) => a.running) }));
+  const sessions = scopedSessions.filter((s) => visible.has(s.id))
+    .map((s) => ({ ...s, contextOnly: s.id !== focusID && !showIdle && !active(s), subagents: showIdle ? s.subagents : s.subagents.filter((a) => a.running) }));
   const byID = new Map(sessions.map((s) => [s.id, s]));
   const childrenOf = new Map(sessions.map((s) => [s.id, []]));
   for (const s of sessions) if (byID.has(parentOf.get(s.id))) childrenOf.get(parentOf.get(s.id)).push(s);
@@ -373,7 +404,7 @@ function build(snap) {
   observeMessages(snap);
   if (selected && !nodes.has(selected.id)) selected = null;
   if (hover && !nodes.has(hover.id)) { hover = null; tip.style.display = "none"; cv.style.cursor = "default"; }
-  renderSidebar(snap, sessions);
+  renderSidebar(scoped, sessions, force);
 }
 new ResizeObserver(() => { resize(); build(snapshot); }).observe(stage);
 
@@ -606,6 +637,79 @@ function toggleSelect(n) { selected = n && selected !== n ? n : null; if (sideba
 cv.addEventListener("click", (e) => toggleSelect(pick(e.offsetX, e.offsetY)));
 cv.addEventListener("mousemove", (e) => { hover = pick(e.offsetX, e.offsetY); cv.style.cursor = hover ? "pointer" : "default"; showTip(hover, e.offsetX, e.offsetY); });
 cv.addEventListener("mouseleave", () => { hover = null; tip.style.display = "none"; });
+cv.addEventListener("contextmenu", (e) => {
+  const n = pick(e.offsetX, e.offsetY);
+  if (n?.type !== "session") return;
+  e.preventDefault();
+  openSessionMenu(n.s.id, e.clientX, e.clientY);
+});
+
+function setFocus(id) {
+  focusID = id;
+  focusName = snapshot?.sessions.find((s) => s.id === id)?.name || id || "";
+  closeSessionMenu();
+  if (snapshot) build(snapshot, true);
+}
+document.getElementById("clearFocus").onclick = () => {
+  setFocus(null);
+  document.getElementById("showIdle").focus();
+};
+
+const sessionMenu = document.getElementById("sessionMenu");
+let menuReturnID = null;
+function closeSessionMenu(restore = false) {
+  const wasOpen = !sessionMenu.hidden;
+  sessionMenu.hidden = true;
+  if (restore && wasOpen) {
+    const card = [...document.querySelectorAll(".card")].find((el) => el.dataset.id === "s:" + menuReturnID);
+    (card || document.getElementById("showIdle")).focus({ preventScroll: true });
+  }
+}
+function canShowApp(s) {
+  return "jump" in (document.body.dataset || {}) && (s.surface === "Copilot app" || s.kind === "vscode-chat" || s.pid > 0);
+}
+function sessionActions(s, menu = false) {
+  const button = (action, text) => `<button type="button"${menu ? ' role="menuitem"' : ""} class="${action === "jump" ? "jump" : "session-action"}" data-id="${action}:${esc(s.id)}" data-action="${action}" data-session="${esc(s.id)}">${text}</button>`;
+  return button("focus", "Focus this session and descendants")
+    + (focusID ? button("reset", "Show all sessions") : "")
+    + (canShowApp(s) ? button("jump", "Show app") : "");
+}
+function runSessionAction(btn) {
+  const { action, session } = btn.dataset;
+  closeSessionMenu(true);
+  if (action === "focus") setFocus(session);
+  else if (action === "reset") setFocus(null);
+  else if (action === "jump") return showApp(btn);
+}
+function openSessionMenu(id, x, y) {
+  const s = snapshot?.sessions.find((s) => s.id === id);
+  if (!s) return;
+  menuReturnID = id;
+  sessionMenu.innerHTML = sessionActions(s, true);
+  sessionMenu.setAttribute("aria-label", "Actions: " + s.name);
+  sessionMenu.hidden = false;
+  sessionMenu.style.left = Math.max(8, Math.min(x, innerWidth - sessionMenu.offsetWidth - 8)) + "px";
+  sessionMenu.style.top = Math.max(8, Math.min(y, innerHeight - sessionMenu.offsetHeight - 8)) + "px";
+  for (const btn of sessionMenu.querySelectorAll("button")) btn.onclick = () => runSessionAction(btn);
+  sessionMenu.querySelector("button")?.focus();
+  hover = null;
+  tip.style.display = "none";
+}
+sessionMenu.onkeydown = (e) => {
+  const buttons = [...sessionMenu.querySelectorAll("button")], index = buttons.indexOf(document.activeElement);
+  if (e.key === "Escape" || e.key === "Tab") {
+    closeSessionMenu(true);
+    if (e.key === "Escape") e.preventDefault();
+  } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+    e.preventDefault();
+    const next = e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1
+      : (index + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+    buttons[next]?.focus();
+  }
+};
+document.addEventListener("pointerdown", (e) => { if (!sessionMenu.contains(e.target)) closeSessionMenu(); });
+addEventListener("resize", () => closeSessionMenu(true));
+document.addEventListener("scroll", (e) => { if (!sessionMenu.contains(e.target)) closeSessionMenu(true); }, true);
 
 // The information about a node, as HTML. The tooltip and the details in the sidebar use it.
 // `full` is for the details: no title, the full folder, all running tools, and the tokens of each model.
@@ -707,16 +811,17 @@ function detailsHTML(sid) {
     const open = openSubs.has(id) || selected?.id === id;
     return bn ? `<details data-sub="${esc(id)}"${open ? " open" : ""}><summary data-id="${esc(id)}">Running background shell: <b>${esc(b.id)}</b></summary><div>${nodeInfo(bn, true)}</div></details>` : "";
   }).join("");
-  // The app shows the app of a session: a URL for the Copilot app, the editor of a VS Code chat, or the process of the session.
-  const jump = "jump" in (document.body.dataset || {}) && (n.s.surface === "Copilot app" || n.s.kind === "vscode-chat" || n.s.pid > 0)
-    ? `<button type="button" class="jump" data-id="jump:${esc(n.s.id)}" data-session="${esc(n.s.id)}">Show app</button>` : "";
-  return `<div class="details" id="details" role="region" aria-label="${esc("Details: " + n.s.name)}" style="--c:${n.color}">${jump}${nodeInfo(n, true)}${subs}${shells}</div>`;
+  return `<div class="details" id="details" role="region" aria-label="${esc("Details: " + n.s.name)}" style="--c:${n.color}">${sessionActions(n.s)}${nodeInfo(n, true)}${subs}${shells}</div>`;
 }
 // showApp asks the app to show the app of a session.
 function showApp(btn) {
-  fetch("api/jump?session=" + encodeURIComponent(btn.dataset.session), { method: "POST" })
-    .then((r) => { if (!r.ok) throw r; })
-    .catch(() => { btn.textContent = "App not found"; });
+  const status = document.getElementById("actionStatus");
+  status.textContent = "";
+  btn.disabled = true;
+  return fetch("api/jump?session=" + encodeURIComponent(btn.dataset.session), { method: "POST" })
+    .then((r) => { if (!r.ok) throw new Error(r.status === 404 ? "App or session not found." : "Request failed (HTTP " + r.status + ")."); })
+    .catch((err) => { status.textContent = "Could not show app. " + err.message; })
+    .finally(() => { btn.disabled = false; });
 }
 function renderSidebar(snap, sessions, force) {
   sidebarArgs = [snap, sessions];
@@ -744,7 +849,7 @@ function renderSidebar(snap, sessions, force) {
   const cardAttrs = (id) => `tabindex="0" role="button" aria-pressed="${selected?.id === id}" data-id="${esc(id)}"`;
   // A selected child shows the details of its owning session.
   const openSid = selected?.type === "agent" || selected?.type === "shell" ? "s:" + selected.parent.id : selected?.type === "session" ? selected.id : null;
-  let listH = !sessions.length ? `<div class="empty">No agents are working right now.</div>` : `<h2>Agents</h2>` + sessions.map((s) => {
+  let listH = !sessions.length ? `<div class="empty">${focusID ? "Focused session is no longer available. Choose Show all sessions to leave this view." : "No agents are working right now."}</div>` : `<h2>Agents</h2>` + sessions.map((s) => {
     const c = surfaceColor(s.surface);
     const st = s.waiting ? "wait" : s.busy ? "busy" : "";
     const t = s.runningTools[0];
@@ -771,10 +876,23 @@ function renderSidebar(snap, sessions, force) {
   setPanel(list, listH, () => {
     for (const el of list.querySelectorAll(".card")) {
       el.onclick = () => toggleSelect(nodes.get(el.dataset.id));
-      el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.click(); } };
+      el.oncontextmenu = (e) => {
+        const n = nodes.get(el.dataset.id);
+        if (n?.type !== "session") return;
+        e.preventDefault();
+        const rect = el.getBoundingClientRect();
+        openSessionMenu(n.s.id, e.clientX || rect.left, e.clientY || rect.bottom);
+      };
+      el.onkeydown = (e) => {
+        if ((e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) && nodes.get(el.dataset.id)?.type === "session") {
+          e.preventDefault();
+          const rect = el.getBoundingClientRect();
+          openSessionMenu(nodes.get(el.dataset.id).s.id, rect.left, rect.bottom);
+        } else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.click(); }
+      };
     }
     for (const el of list.querySelectorAll(".details details")) el.ontoggle = () => { if (el.open) openSubs.add(el.dataset.sub); else openSubs.delete(el.dataset.sub); };
-    for (const el of list.querySelectorAll(".details .jump")) el.onclick = () => showApp(el);
+    for (const el of list.querySelectorAll(".details [data-action]")) el.onclick = () => runSessionAction(el);
   }, force);
 
   const evs = [];
@@ -784,7 +902,7 @@ function renderSidebar(snap, sessions, force) {
     for (const p of s.peers) if (snap.now - p.at < 300e3) evs.push({ at: p.at, s, f: { sink: p.kind === "spawn" ? "spawned session" : "→ " + (allById.get(p.to)?.name || p.to.slice(0, 8)), tool: p.kind, desc: p.text, peer: true } });
   }
   evs.sort((a, b) => b.at - a.at);
-  renderModels(snap.sessions, snap);
+  renderModels(snap.sessions, snap, force);
   // Use the full snapshot: without "show idle", the graph has no completed sub-agents, but the feed still shows their commands.
   const subName = (s, aid) => aid ? ((allById.get(s.id) || s).subagents.find((x) => x.id === aid)?.name || "sub-agent " + String(aid).slice(0, 8)) : "";
   const rows = evs.slice(0, 150).map(({ at, s, f }) => {
@@ -802,7 +920,7 @@ function renderSidebar(snap, sessions, force) {
   setPanel(feed, rows
     ? `<table><colgroup><col style="width:58px"><col style="width:22%"><col style="width:150px"><col style="width:120px"><col></colgroup>`
       + `<thead><tr><th>When</th><th>Agent</th><th>Destination</th><th>Tool</th><th>Command / details</th></tr></thead><tbody>${rows}</tbody></table>`
-    : `<div class="empty">No data flowing in the last 2 minutes.</div>`, (atTop) => { if (atTop) feed.scrollTop = 0; });
+    : `<div class="empty">No data flowing in the last 2 minutes.</div>`, (atTop) => { if (atTop) feed.scrollTop = 0; }, force);
 }
 // Counts from the logs can be other types. Show only numbers.
 const num = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0;
@@ -810,7 +928,7 @@ function fmtTok(n) { n = num(n); return n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 
 // Sessions use model ids ("claude-sonnet-4.5"), usage records use display names ("Claude Sonnet 4.5").
 const modelKey = (m) => String(m || "").replace(/^.*\//, "").toLowerCase().replace(/[^a-z0-9.]/g, "");
 const baseModelKey = (m) => modelKey(String(m || "").replace(/\s*·\s*BYOK$/i, ""));
-function renderModels(sessions, snap) {
+function renderModels(sessions, snap, force) {
   const M = new Map(), get = (m) => { const k = modelKey(m); return M.get(k) || (M.set(k, { name: m, recentIn: 0, recentOut: 0, recentCalls: 0, recentUnknown: false, last: 0, active: false, tIn: 0, tOut: 0, tCalls: 0, tUnknown: false, by: new Map() }), M.get(k)); };
   // Active: the current model of a working or waiting session, or the model of a running sub-agent.
   const activeKeys = new Set();
@@ -846,7 +964,7 @@ function renderModels(sessions, snap) {
         <span title="all usage seen in the session logs that the radar read">seen</span><b>${fmtTok(x.tIn)}</b><b>${fmtTok(x.tOut)}</b>${calls(x.tCalls, x.tUnknown)}</div>
       ${by.length ? `<div class="bar">${bar}</div><div class="who">${who}</div>` : ""}</div>`;
   }).join("");
-  setPanel(document.getElementById("models"), `<h2>Model tokens</h2>` + (html || `<div class="empty">No model usage.</div>`));
+  setPanel(document.getElementById("models"), `<h2>Model tokens</h2>` + (html || `<div class="empty">No model usage.</div>`), null, force);
 }
 function highlightCard() {
   for (const el of document.querySelectorAll(".card")) {
