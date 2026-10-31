@@ -120,6 +120,7 @@ These operating systems are supported:
 - A live feed of the data flows, with the tool and the command of each flow.
 - The model tokens for each model. This includes models that you configure with your own key (BYOK).
 - A side panel with the details of the selected item. In the app, the details of a session have a **Show app** button.
+- Session context actions to focus the radar on one session and its descendants, or show the session's app.
 - A status icon in the macOS menu bar or in the Windows notification area.
 - A JSON summary for scripts and for AI agents.
 
@@ -167,6 +168,38 @@ A click on a session that waits shows the related app:
 
 In the radar window, click a session to show its details. The **Show app** button in the details shows the app of the session in the same way.
 The button is only in the app. It is not available in `-demo` mode or with a LAN address.
+
+### Focus a session
+
+Right-click a session in the graph or the sidebar and choose **Focus this session and descendants**.
+In the sidebar, you can also press Shift-F10 or the context-menu key on a session card.
+The session details have the same focus action, so a context menu is not required.
+An ordinary click still selects the session without filtering the radar or switching apps.
+
+The focused view includes the session, its nested child sessions, sub-agents, background shells,
+and data destinations. The graph, sidebar, counters, activity feed, and model totals all use this scope.
+New child sessions appear as the radar updates. Messages to other sessions do not pull those sessions into the view.
+Model totals still include the idle session history within the scope; **show idle / completed** controls which
+descendants and completed sub-agents are visible. The focused root stays visible even when idle.
+
+The header names the focused session. Choose **Show all sessions** to return to the full live view.
+If the session disappears, the radar shows that it is no longer available rather than silently switching back.
+Focus lasts for the current page; reloading the page restores the full view.
+
+The context menu also has **Show app** when the native app can show that session, using the same
+behavior and restrictions as the details button. Use the arrow keys to navigate the menu,
+Enter or Space to choose an action, and Escape to dismiss it.
+
+For Copilot app sessions, **Show app** opens `ghapp://sessions/<sessionId>` through the operating system,
+which can launch the registered Copilot app if needed. It never creates a new session.
+The app must be installed and its protocol handler registered. Accepting a launch request does not
+guarantee that the target session exists or that the operating system brings the correct window to the front.
+VS Code navigation targets the owning folder or workspace, not a particular chat.
+CLI navigation is best-effort terminal-app/window focus, not exact terminal-tab selection.
+
+![A focused session tree and its context menu, using demo data](docs/images/session-focus.png)
+
+### Other menu commands
 
 The menu also has these commands:
 

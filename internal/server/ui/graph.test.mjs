@@ -8,7 +8,7 @@ const source = html.split("<script>")[1].split("// ---------- Panels ----------"
 const panelSource = html.split("<script>")[1].split("// Feed resize grip")[0];
 
 function graph(width = 1000, height = 500, panels = false) {
-  const labels = [], paths = [], arcs = [];
+  const labels = [], paths = [], arcs = [], listeners = new Map(), requests = [];
   const ctx = new Proxy({
     measureText: (text) => ({ width: text.length * 8 }),
     getImageData: () => ({ data: [13, 17, 23, 255] }),
@@ -18,27 +18,60 @@ function graph(width = 1000, height = 500, panels = false) {
     arc: (x, y, r) => arcs.push({ x, y, r }),
   }, { get: (target, key) => key in target ? target[key] : () => {} });
   const elements = new Map();
+  const on = (id, type, listener) => {
+    const key = id + ":" + type;
+    if (!listeners.has(key)) listeners.set(key, []);
+    listeners.get(key).push(listener);
+  };
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, {
       style: { setProperty() {} }, clientWidth: width, clientHeight: height,
-      innerHTML: "", checked: false, addEventListener() {}, getContext: () => ctx,
-      contains: () => false, querySelectorAll: () => [],
+      innerHTML: "", checked: false, hidden: true, offsetWidth: 260, offsetHeight: 100,
+      dataset: {}, addEventListener: (type, listener) => on(id, type, listener), getContext: () => ctx,
+      contains(target) { return this === target || this.querySelectorAll("button").includes(target); },
+      setAttribute(key, value) { this[key] = value; },
+      focus() { document.activeElement = this; },
+      getBoundingClientRect: () => ({ left: 20, bottom: 60 }),
+      click() { return this.onclick?.(); },
+      querySelector(selector) { return this.querySelectorAll(selector)[0]; },
+      querySelectorAll(selector) {
+        if (selector === ".details details") return [];
+        const cards = selector === ".card", pattern = cards ? /<div class="card [^>]+>/g : /<button[^>]+>[^<]*<\/button>/g;
+        if (this.parsedHTML !== this.innerHTML) { this.parsedHTML = this.innerHTML; this.parsed = new Map(); }
+        if (!this.parsed?.has(selector)) this.parsed.set(selector, [...this.innerHTML.matchAll(pattern)].map(([tag]) => {
+          const attrs = Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, k, v]) => [k, v]));
+          const el = { ...element("parsed:" + id + ":" + attrs["data-id"]), dataset: {}, textContent: tag.replace(/<[^>]+>/g, "") };
+          for (const [k, v] of Object.entries(attrs)) if (k.startsWith("data-")) el.dataset[k.slice(5)] = v;
+          return el;
+        }));
+        return this.parsed.get(selector);
+      },
     });
     return elements.get(id);
   };
+  const document = {
+    getElementById: element, createElement: element, body: element("body"),
+    addEventListener: (type, listener) => on("document", type, listener),
+    querySelectorAll: (selector) => element("list").querySelectorAll(selector),
+  };
   const sandbox = {
-    document: { getElementById: element, createElement: element, body: element("body"), addEventListener() {} },
+    document, innerWidth: width, innerHeight: height,
     window: { devicePixelRatio: 2 }, performance: { now: () => 1000 },
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     getComputedStyle: () => ({ backgroundColor: "#0d1117", getPropertyValue: () => "" }),
     ResizeObserver: class { observe() {} },
     requestAnimationFrame() {}, renderSidebar() {},
-    getSelection: () => null, addEventListener() {},
+    getSelection: () => null, addEventListener: (type, listener) => on("window", type, listener),
+    CSS: { escape: (s) => s }, setTimeout() {},
+    fetch: async (url, options) => { requests.push({ url, options }); return { ok: true }; },
   };
   vm.createContext(sandbox);
   vm.runInContext((panels ? panelSource : source) + `
     reduceMotion = true;
     globalThis.graph = { build, draw, pick, toggleSelect, nodeInfo, label, nodes, focusedNodes, messagePoint, drawMessages, spawnParticles,
+      setFocus, sessionActions, openSessionMenu, closeSessionMenu, runSessionAction,
+      ${panels ? "showApp," : ""}
+      get focusID() { return focusID; },
       setReducedMotion(value) { reduceMotion = value; },
       get messagePulses() { return messagePulses; }, get particles() { return particles; },
       get links() { return links; }, get selected() { return selected; },
@@ -48,7 +81,11 @@ function graph(width = 1000, height = 500, panels = false) {
   sandbox.sidebarArgs = null;
   sandbox.highlightCard = () => {};
   element("showIdle");
-  return { api: sandbox.graph, elements, labels, paths, arcs };
+  return {
+    api: sandbox.graph, elements, labels, paths, arcs, requests, document,
+    setFetch(fn) { sandbox.fetch = fn; },
+    emit(id, type, event = {}) { for (const listener of listeners.get(id + ":" + type) || []) listener(event); },
+  };
 }
 
 function session(id, count = 0) {
@@ -386,4 +423,206 @@ test("resumed background agents reappear under the same owner, completed history
   assert.equal(api.links.find((l) => l.kind === "flow").a, "a:owner:child-3");
   assert.equal(api.nodes.get("a:owner:child-3").parent.id, s.id);
   assert.equal(api.nodes.get("b:owner:server").type, "shell");
+});
+
+test("session focus scopes the graph, counters, feed and model history without following peers", () => {
+  const { api, elements } = graph(1000, 500, true);
+  const parent = session("parent"), root = session("root", 2), child = session("child"), leaf = session("leaf"), peer = session("peer");
+  parent.childSessions = [root.id, peer.id];
+  root.childSessions = [child.id];
+  root.subagents[1].running = false;
+  child.childSessions = [leaf.id];
+  child.busy = leaf.busy = false;
+  root.backgroundShells = [{ id: "server", pid: 123 }];
+  root.flows = [{ sink: "Filesystem", tool: "view", desc: "Root work", endAt: Date.now() }];
+  peer.flows = [{ sink: "Outside sink", tool: "view", desc: "Unrelated work", endAt: Date.now() }];
+  root.peers = [{ to: peer.id, kind: "message", at: Date.now() }];
+  leaf.modelTokens = { "Idle leaf model": { in: 23000, out: 1000, calls: 1 } };
+  peer.modelTokens = { "Outside model": { in: 999000, out: 5000, calls: 1 } };
+  api.build(snapshot(parent, root, child, leaf, peer));
+  api.toggleSelect(api.nodes.get("s:peer"));
+  api.setFocus(root.id);
+  assert.equal(api.selected, null);
+  assert.ok(api.nodes.has("s:root") && api.nodes.has("a:root:child-0") && api.nodes.has("b:root:server"));
+  assert.ok(!api.nodes.has("s:parent") && !api.nodes.has("s:peer") && !api.nodes.has("k:Outside sink"));
+  assert.ok(!api.nodes.has("s:child") && !api.nodes.has("s:leaf") && !api.nodes.has("a:root:child-1"));
+  assert.equal(api.nodes.get("s:root").parentSessionID, null);
+  assert.equal(elements.get("sAll").textContent, 1);
+  assert.equal(elements.get("sBusy").textContent, 1);
+  assert.equal(elements.get("sSub").textContent, 1);
+  assert.equal(elements.get("sShell").textContent, 1);
+  assert.equal(elements.get("sFlow").textContent, 1);
+  assert.match(elements.get("feed").innerHTML, /Root work/);
+  assert.doesNotMatch(elements.get("feed").innerHTML, /Unrelated work/);
+  assert.match(elements.get("models").innerHTML, /Idle leaf model/);
+  assert.doesNotMatch(elements.get("models").innerHTML, /Outside model/);
+  assert.equal(elements.get("focusScope").hidden, false);
+  elements.get("showIdle").checked = true;
+  api.build(snapshot(parent, root, child, leaf, peer));
+  assert.equal(elements.get("sAll").textContent, 3);
+  assert.ok(api.nodes.has("s:child") && api.nodes.has("s:leaf") && api.nodes.has("a:root:child-1"));
+  api.setFocus(null);
+  assert.equal(elements.get("sAll").textContent, 5);
+  assert.match(elements.get("feed").innerHTML, /Unrelated work/);
+  assert.match(elements.get("models").innerHTML, /Outside model/);
+  assert.equal(elements.get("focusScope").hidden, true);
+});
+
+test("focused idle roots stay visible, new descendants join, missing roots stay explicitly empty", () => {
+  const { api, elements } = graph(1000, 500, true);
+  const root = session("root"), child = session("child"), unrelated = session("unrelated");
+  root.busy = false;
+  api.build(snapshot(root, unrelated));
+  api.setFocus(root.id);
+  assert.ok(api.nodes.has("s:root"));
+  assert.equal(api.nodes.get("s:root").s.contextOnly, false);
+  root.childSessions = [child.id];
+  api.build(snapshot(root, unrelated, child));
+  assert.ok(api.nodes.has("s:child"));
+  assert.equal(elements.get("sAll").textContent, 2);
+  api.build(snapshot(unrelated, child));
+  assert.equal(elements.get("sAll").textContent, 0);
+  assert.equal(api.focusID, root.id);
+  assert.match(elements.get("focusLabel").textContent, /Session no longer available: Parent root/);
+  assert.match(elements.get("list").innerHTML, /Show all sessions/);
+  assert.doesNotMatch(elements.get("list").innerHTML, /Parent unrelated/);
+  assert.match(elements.get("models").innerHTML, /No model usage/);
+  api.build(snapshot(root, child, unrelated));
+  assert.ok(api.nodes.has("s:root") && api.nodes.has("s:child"));
+  api.setFocus(null);
+  assert.ok(api.nodes.has("s:unrelated"));
+});
+
+test("focus uses the same deterministic ownership as layout for cycles and duplicate claims", () => {
+  const { api, elements } = graph(1000, 500, true);
+  const a = session("a"), b = session("b"), c = session("c"), other = session("other");
+  a.childSessions = [a.id, b.id, "missing", b.id];
+  b.childSessions = [c.id];
+  c.childSessions = [a.id];
+  other.childSessions = [c.id];
+  api.build(snapshot(other, c, b, a));
+  api.setFocus(b.id);
+  assert.equal(elements.get("sAll").textContent, 2);
+  assert.ok(api.nodes.has("s:b") && api.nodes.has("s:c"));
+  assert.ok(!api.nodes.has("s:a") && !api.nodes.has("s:other") && !api.nodes.has("s:missing"));
+});
+
+test("focus changes flush every panel immediately but later updates still defer while interacting", () => {
+  const { api, elements, emit } = graph(1000, 500, true);
+  const a = session("a"), b = session("b");
+  a.flows = [{ sink: "Filesystem", tool: "view", desc: "A work", endAt: Date.now() }];
+  b.modelTokens = { "B model": { in: 1000 } };
+  api.build(snapshot(a, b));
+  for (const id of ["list", "feed", "models"]) emit(id, "pointerenter");
+  api.setFocus(a.id);
+  assert.doesNotMatch(elements.get("list").innerHTML, /Parent b/);
+  assert.doesNotMatch(elements.get("models").innerHTML, /B model/);
+  a.name = "Renamed";
+  a.flows[0].desc = "New description";
+  a.modelTokens = { "New model": { in: 1000 } };
+  api.build(snapshot(a, b));
+  assert.doesNotMatch(elements.get("list").innerHTML, /Renamed/);
+  assert.doesNotMatch(elements.get("feed").innerHTML, /New description/);
+  assert.doesNotMatch(elements.get("models").innerHTML, /New model/);
+  for (const id of ["list", "feed", "models"]) emit(id, "pointerleave");
+  assert.match(elements.get("list").innerHTML, /Renamed/);
+  assert.match(elements.get("feed").innerHTML, /New description/);
+  assert.match(elements.get("models").innerHTML, /New model/);
+});
+
+test("context actions work on graph and sidebar with keyboard navigation and dismissal", () => {
+  const { api, elements, document, emit } = graph(1000, 500, true);
+  const root = session("root");
+  root.pid = 42;
+  api.build(snapshot(root));
+  const n = api.nodes.get("s:root"), menu = elements.get("sessionMenu");
+  let prevented = 0;
+  const preventDefault = () => prevented++;
+  emit("cv", "click", { offsetX: n.x, offsetY: n.y });
+  assert.equal(api.selected, n);
+  assert.equal(api.focusID, null);
+  emit("cv", "contextmenu", { offsetX: n.x, offsetY: n.y, clientX: 999, clientY: 499, preventDefault });
+  assert.equal(menu.hidden, false);
+  assert.equal(menu.style.left, "732px");
+  assert.equal(menu.style.top, "392px");
+  assert.doesNotMatch(menu.innerHTML, /Show app/);
+  let buttons = menu.querySelectorAll("button");
+  assert.equal(document.activeElement, buttons[0]);
+  menu.onkeydown({ key: "Escape", preventDefault });
+  assert.equal(menu.hidden, true);
+  assert.equal(document.activeElement.dataset.id, "s:root");
+  const card = elements.get("list").querySelectorAll(".card")[0];
+  card.onkeydown({ key: "F10", shiftKey: true, preventDefault });
+  assert.equal(menu.hidden, false);
+  buttons = menu.querySelectorAll("button");
+  buttons[0].click();
+  assert.equal(api.focusID, root.id);
+  assert.equal(menu.hidden, true);
+  elements.get("body").dataset = { jump: "" };
+  card.oncontextmenu({ clientX: 20, clientY: 60, preventDefault });
+  buttons = menu.querySelectorAll("button");
+  assert.equal(buttons.length, 3);
+  menu.onkeydown({ key: "End", preventDefault });
+  assert.equal(document.activeElement.dataset.action, "jump");
+  menu.onkeydown({ key: "ArrowDown", preventDefault });
+  assert.equal(document.activeElement.dataset.action, "focus");
+  menu.onkeydown({ key: "ArrowUp", preventDefault });
+  assert.equal(document.activeElement.dataset.action, "jump");
+  menu.onkeydown({ key: "Home", preventDefault });
+  assert.equal(document.activeElement.dataset.action, "focus");
+  menu.onkeydown({ key: "Tab", preventDefault });
+  assert.equal(menu.hidden, true);
+  api.openSessionMenu(root.id, -30, -30);
+  assert.equal(menu.style.left, "8px");
+  emit("document", "pointerdown", { target: menu.querySelectorAll("button")[0] });
+  assert.equal(menu.hidden, false);
+  emit("document", "pointerdown", { target: elements.get("stage") });
+  assert.equal(menu.hidden, true);
+  api.openSessionMenu(root.id, 0, 0);
+  emit("window", "resize");
+  assert.equal(menu.hidden, true);
+  api.openSessionMenu(root.id, 0, 0);
+  emit("document", "scroll", { target: elements.get("stage") });
+  assert.equal(menu.hidden, true);
+  api.openSessionMenu(root.id, 0, 0);
+  menu.querySelectorAll("button")[1].click();
+  assert.equal(api.focusID, null);
+  api.openSessionMenu("missing", 0, 0);
+  assert.equal(menu.hidden, true);
+  assert.ok(prevented >= 8);
+});
+
+test("details offer accessible focus actions without app support and escape session metadata", () => {
+  const { api, elements, document } = graph(1000, 500, true);
+  const root = session('root"<>');
+  api.build(snapshot(root));
+  api.toggleSelect(api.nodes.get("s:" + root.id));
+  assert.match(elements.get("list").innerHTML, /Focus this session and descendants/);
+  assert.match(api.sessionActions(root, true), /data-session="root&quot;&lt;&gt;"/);
+  assert.doesNotMatch(api.sessionActions(root, true), /Show app/);
+  api.setFocus(root.id);
+  assert.match(api.sessionActions(root), /Show all sessions/);
+  elements.get("clearFocus").click();
+  assert.equal(api.focusID, null);
+  assert.equal(document.activeElement, elements.get("showIdle"));
+});
+
+test("Show app reuses the encoded guarded POST and reports launch and network failures", async () => {
+  const { api, elements, requests, setFetch } = graph(1000, 500, true);
+  const btn = { dataset: { session: "session/with ?query" } };
+  await api.showApp(btn);
+  assert.equal(requests[0].url, "api/jump?session=session%2Fwith%20%3Fquery");
+  assert.equal(requests[0].options.method, "POST");
+  assert.equal(btn.disabled, false);
+  assert.equal(elements.get("actionStatus").textContent, "");
+  for (const status of [404, 403, 500]) {
+    setFetch(async () => ({ ok: false, status }));
+    await api.showApp(btn);
+    assert.match(elements.get("actionStatus").textContent, /Could not show app/);
+    assert.match(elements.get("actionStatus").textContent, status === 404 ? /not found/ : new RegExp("HTTP " + status));
+    assert.equal(btn.disabled, false);
+  }
+  setFetch(async () => { throw new Error("Network unavailable"); });
+  await api.showApp(btn);
+  assert.match(elements.get("actionStatus").textContent, /Network unavailable/);
 });
