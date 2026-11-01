@@ -52,7 +52,7 @@ def check_shell(base):
                 time.sleep(0.5)
             log.seek(0)
             output = log.read()
-            if output.count("AGENT_RADAR_TEST_CLEAN") < 3:
+            if output.count("AGENT_RADAR_TEST_CLEAN") < 3 or "AGENT_RADAR_TEST_ICON" not in output:
                 raise RuntimeError("Extension cleanup did not complete")
             try:
                 with urllib.request.urlopen("http://127.0.0.1:47900/api/status", timeout=5):
@@ -88,6 +88,13 @@ else:
         source = script.read_text().replace(
             "_render(data) {",
             "_render(data) {\n        console.log('AGENT_RADAR_TEST_STATUS ' + (data ? 'live' : 'offline'));",
+        ).replace(
+            "this._indicator.icon.gicon = this._icons.get(display.icon);",
+            """this._indicator.icon.gicon = this._icons.get(display.icon);
+        if (!(this._indicator.icon.gicon instanceof Gio.FileIcon) ||
+            !this._indicator.icon.gicon.get_file().query_exists(null))
+            throw new Error('The Radar status icon is not bundled artwork');
+        console.log('AGENT_RADAR_TEST_ICON ' + display.state);""",
         ).replace(
             "this._menuKey = undefined;",
             """this._menuKey = undefined;

@@ -15,10 +15,10 @@ export function readStatus(text, now = Date.now()) {
 
 export function displayStatus(data) {
     if (!data)
-        return {label: 'Radar !', title: 'Radar disconnected - data is stale', state: 'offline', icon: 'network-offline-symbolic'};
+        return {label: 'Radar !', title: 'Radar disconnected - data is stale', state: 'offline', icon: 'radar-offline-symbolic.svg'};
     if (data.waiting)
-        return {label: `${data.working} / ${data.waiting}`, title: `${data.working} working, ${data.waiting} waiting for you`, state: 'waiting', icon: 'dialog-warning-symbolic'};
+        return {label: `${data.working} / ${data.waiting}`, title: `${data.working} working, ${data.waiting} waiting for you`, state: 'waiting', icon: 'radar-waiting-symbolic.svg'};
     if (data.working)
-        return {label: `${data.working}`, title: `${data.working} working, none waiting`, state: 'working', icon: 'emblem-ok-symbolic'};
-    return {label: '0', title: 'No agent is active', state: 'idle', icon: 'media-playback-pause-symbolic'};
+        return {label: `${data.working}`, title: `${data.working} working, none waiting`, state: 'working', icon: 'radar-working-symbolic.svg'};
+    return {label: '0', title: 'No agent is active', state: 'idle', icon: 'radar-idle-symbolic.svg'};
 }

@@ -18,7 +18,7 @@ BIN="$HOME/.local/bin"
 APP="$DATA/agent-radar"
 TMP="$(mktemp -d)"
 trap 'rm -f "$TMP/agent-radar@awlx.github.io.shell-extension.zip"; rmdir "$TMP"' EXIT
-gnome-extensions pack linux/extension --extra-source=status.js --force --out-dir="$TMP"
+gnome-extensions pack linux/extension --extra-source=status.js --extra-source=icons --force --out-dir="$TMP"
 mkdir -p "$BIN" "$APP" "$DATA/applications" "$CONFIG/systemd/user"
 if [ -x dist/linux/agent-radar ]; then
     install -m 755 dist/linux/agent-radar "$BIN/agent-radar"

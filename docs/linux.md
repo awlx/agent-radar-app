@@ -43,6 +43,49 @@ The data and configuration paths follow `XDG_DATA_HOME` and `XDG_CONFIG_HOME` if
 The installer does not start the backend, enable the extension, or enable login autostart.
 Close a running Radar window before an update. Restart the backend after an update.
 
+### Fedora Workstation
+
+Use a GNOME desktop session. These package names are from the
+[Fedora package index](https://packages.fedoraproject.org/).
+Fedora itself has not been tested.
+
+Install the runtime and source-build tools:
+
+```sh
+sudo dnf install git golang gjs gtk4 webkitgtk6.0 libsoup3 gnome-shell xdg-utils
+gnome-shell --version
+```
+
+The installer accepts GNOME Shell 45 through 51. Only Shell 51 has native runtime tests.
+To try an unmerged pull request, get its number from the pull request page.
+Use the current **Code** tab to check the source before you build it:
+
+```sh
+git clone https://github.com/awlx/agent-radar-app.git
+cd agent-radar-app
+PR_NUMBER=123
+git fetch origin "pull/$PR_NUMBER/head"
+git switch --detach FETCH_HEAD
+sh linux/build-app.sh
+sh linux/install.sh
+systemctl --user start agent-radar.service
+gnome-extensions enable agent-radar@awlx.github.io
+~/.local/bin/agent-radar-gnome
+```
+
+Replace `123` with the actual pull request number. Do not run a different Radar server
+on port 47900 at the same time. The app opens a native window, not a browser tab.
+If Shell does not find the extension, use the window now and enable the extension
+after your next normal login. Updating already imported extension JavaScript can also
+require a fresh Shell session. Disabling and enabling is not a JavaScript reload.
+Login autostart stays off.
+
+The build also creates `dist/linux/Agent-Radar_<version>_Linux_<arch>.tar.gz`.
+You can give this file to a user with the same CPU architecture.
+They need the runtime packages above, but not Git or Go. They extract it, enter the
+extracted folder, and run `sh linux/install.sh`, then the three start commands above.
+This is a local build artifact, not a published release.
+
 ## Start
 
 Stop an older Radar server if it uses port 47900. Then run:
@@ -74,8 +117,12 @@ For an extension update, disable it and install the update. A fresh Shell sessio
 also be needed before GNOME uses changed JavaScript files.
 
 The top bar shows working and waiting session counts. Sub-agents do not add a second session count.
-Red means a session waits for you. Green means a session works and none waits.
-Yellow means no session is active. Gray with **Radar !** means disconnected or stale data, not idle.
+The fixed Radar mark follows the macOS icon: two rings, a sweep line, and blips.
+Its lower-right badge shows a check for working, a stop square for waiting, and pause bars for idle.
+GNOME's symbolic palette gives those badges success, error, and warning colors.
+The Radar strokes use the panel foreground color for light, dark, and high-contrast themes.
+The shapes also identify status without color. An exclamation badge with **Radar !**
+means disconnected or stale data, not idle. The icon does not move.
 The menu lists up to 50 waiting sessions. The total still includes all waiting sessions.
 **Open Radar** opens the native graph window.
 
@@ -140,6 +187,7 @@ node --test internal/server/ui/graph.test.mjs linux/extension/status.test.mjs
 sh linux/build-app.sh
 python3 linux/smoke-test.py
 python3 linux/shell-smoke-test.py
+python3 linux/icon-smoke-test.py
 ```
 
 The native smoke test needs a graphical session. It opens and closes a temporary
@@ -150,6 +198,10 @@ The Shell smoke test uses a separate headless compositor, D-Bus session, and tem
 configuration folders. It checks three extension enable/disable cycles.
 It does not restart your desktop or change its extension settings.
 The test can show an offline indicator if no backend runs on port 47900.
+
+The icon smoke test needs Python GObject bindings and GTK 3 introspection
+(`python3-gobject` and `gtk3` on Fedora). It checks four different symbolic badges
+at 16, 24, and 32 pixels with light, dark, and high-contrast foregrounds.
 
 For installed service errors, use:
 
@@ -172,5 +224,6 @@ systemctl --user disable --now agent-radar.service
 
 Remove the named files in the installation table, and the four extension files
 `metadata.json`, `extension.js`, `status.js`, and `stylesheet.css`.
+Remove the four `icons/radar-*-symbolic.svg` files as well.
 Remove their empty folders if needed. Run `systemctl --user daemon-reload`.
 This does not remove Copilot or editor session files.

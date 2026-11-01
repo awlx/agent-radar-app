@@ -23,6 +23,10 @@ const Indicator = GObject.registerClass(class Indicator extends PanelMenu.Button
 
 export default class AgentRadar extends Extension {
     enable() {
+        this._icons = new Map(['working', 'waiting', 'idle', 'offline'].map(state => [
+            `radar-${state}-symbolic.svg`,
+            new Gio.FileIcon({file: this.dir.get_child('icons').get_child(`radar-${state}-symbolic.svg`)}),
+        ]));
         this._indicator = new Indicator();
         this._session = new Soup.Session({timeout: 4});
         this._cancel = new Gio.Cancellable();
@@ -38,7 +42,7 @@ export default class AgentRadar extends Extension {
 
     _render(data) {
         const display = displayStatus(data);
-        this._indicator.icon.icon_name = display.icon;
+        this._indicator.icon.gicon = this._icons.get(display.icon);
         this._indicator.icon.style_class = `system-status-icon radar-${display.state}`;
         this._indicator.label.text = display.label;
         this._indicator.accessible_name = `Agent Radar: ${display.title}`;
@@ -151,5 +155,6 @@ export default class AgentRadar extends Extension {
         this._indicator = null;
         this._statusItem = null;
         this._menuKey = undefined;
+        this._icons = null;
     }
 }

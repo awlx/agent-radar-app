@@ -23,3 +23,20 @@ test('invalid, stale or incompatible state never becomes idle', () => {
         assert.throws(() => readStatus(JSON.stringify(value), now));
     assert.throws(() => readStatus('not JSON', now));
 });
+
+test('every status uses bundled Radar artwork with a distinct fixed badge', () => {
+    const icons = new Set();
+    for (const data of [status, {...status, waiting: 0}, {...status, working: 0, waiting: 0}, null]) {
+        const display = displayStatus(data);
+        assert.equal(display.icon, `radar-${display.state}-symbolic.svg`);
+        const svg = readFileSync(new URL(`./icons/${display.icon}`, import.meta.url), 'utf8');
+        assert.match(svg, /viewBox="0 0 24 24"/);
+        assert.match(svg, /A9 9 0 1 1/);
+        assert.match(svg, /A4.8 4.8 0 1 1/);
+        assert.match(svg, /fill-rule="evenodd"/);
+        assert.doesNotMatch(svg, /<mask/);
+        assert.doesNotMatch(svg, /<animate|<script|href=|https?:\/\/(?!www.w3.org)/);
+        icons.add(svg);
+    }
+    assert.equal(icons.size, 4);
+});

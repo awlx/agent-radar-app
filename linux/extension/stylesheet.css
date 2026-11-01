@@ -1,5 +1,4 @@
-.radar-working { color: #57e389; }
-.radar-waiting { color: #f66151; }
-.radar-idle { color: #f8e45c; }
-.radar-offline { color: #9a9996; }
+.radar-working, .radar-waiting, .radar-idle, .radar-offline {
+  -st-icon-style: symbolic;
+}
 .radar-session { max-width: 32em; }

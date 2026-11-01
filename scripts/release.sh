@@ -35,7 +35,7 @@ for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
 		cp -R linux "$TMP/$app/"
 		cp internal/tray/window_linux.js "$TMP/$app/internal/tray/"
 		cp docs/linux.md "$TMP/$app/docs/"
-		cp README.md LICENSE "$TMP/$app/"
+		cp AGENT.md README.md LICENSE "$TMP/$app/"
 		tar -C "$TMP" -czf "$OUT/$app.tar.gz" "$app"
 	fi
 done
