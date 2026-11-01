@@ -29,7 +29,10 @@ Check the runtime libraries. If `dist/linux/agent-radar` is not available, build
 The Linux bundle includes the binary, installer, and [Fedora commands](docs/linux.md#fedora-workstation).
 For an already loaded Shell extension, installing changed JavaScript does not update
 the running module. Do not claim the new icon is visible without checking a fresh Shell session.
-Start the user service only after stopping an older server on port 47900.
+Launch **Agent Radar** or run `~/.local/bin/agent-radar-gnome`.
+The app manages its backend; no service or `systemctl` step is needed.
+Closing the window hides it. Use **Quit Radar** to stop the app-owned backend.
+An external compatible server can be reused, but the app must not stop it on Quit.
 Do not enable login autostart, install system packages, or restart the desktop without the user's decision.
 
 1. Start the server. The command runs in the foreground until you stop it with Ctrl+C.

@@ -76,6 +76,26 @@ export default class AgentRadar extends Extension {
         const open = new PopupMenu.PopupMenuItem('Open Radar');
         open.connect('activate', () => this._open());
         this._indicator.menu.addMenuItem(open);
+        const quit = new PopupMenu.PopupMenuItem('Quit Radar');
+        quit.connect('activate', () => this._quit());
+        this._indicator.menu.addMenuItem(quit);
+    }
+
+    _quit() {
+        const cancel = this._cancel;
+        Gio.DBus.session.call(
+            'io.github.awlx.AgentRadar', '/io/github/awlx/AgentRadar', 'org.gtk.Actions', 'Activate',
+            new GLib.Variant('(sava{sv})', ['quit', [], {}]), null,
+            Gio.DBusCallFlags.NO_AUTO_START, 2000, cancel, (connection, result) => {
+                if (this._cancel !== cancel || cancel.is_cancelled())
+                    return;
+                try {
+                    connection.call_finish(result);
+                } catch (error) {
+                    this._statusItem.label.text = 'Radar is not running, or it could not quit.';
+                    console.error(`Agent Radar: ${error.message}`);
+                }
+            });
     }
 
     _open() {

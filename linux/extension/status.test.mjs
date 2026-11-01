@@ -40,3 +40,10 @@ test('every status uses bundled Radar artwork with a distinct fixed badge', () =
     }
     assert.equal(icons.size, 4);
 });
+
+test('the desktop installer launches an app-managed backend without a service', () => {
+    const installer = readFileSync(new URL('../install.sh', import.meta.url), 'utf8');
+    assert.match(installer, /exec gjs -m/);
+    assert.match(installer, /--backend/);
+    assert.doesNotMatch(installer, /systemctl|agent-radar\.service|WantedBy=/);
+});

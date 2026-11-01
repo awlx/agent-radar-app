@@ -10,6 +10,20 @@ import (
 	"github.com/awlx/agent-radar-app/internal/collector"
 )
 
+func TestBackendIdentityDoesNotCollect(t *testing.T) {
+	h := NewHandler(NewHub(snapshotSource{nil}, time.Second), "", true, nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "http://127.0.0.1:47900/api/info", nil))
+	if w.Code != http.StatusOK || w.Body.String() != `{"app":"agent-radar","schema":1}` {
+		t.Fatalf("backend identity: %d %s", w.Code, w.Body)
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "http://evil.example/api/info", nil))
+	if w.Code != http.StatusForbidden {
+		t.Fatal("backend identity must retain loopback host checks")
+	}
+}
+
 func TestCachedMenuStatus(t *testing.T) {
 	snap := &collector.Snapshot{Now: time.Now().UnixMilli(), Sessions: []*collector.Session{
 		{ID: "busy", Busy: true},

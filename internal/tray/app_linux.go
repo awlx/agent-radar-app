@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"syscall"
+	"time"
 )
 
 const Supported = true
@@ -36,7 +38,15 @@ func runLinuxWindow(ctx context.Context, opts Options) error {
 	if !opts.ShowWindow {
 		args = append(args, "--background")
 	}
+	if opts.Backend != "" {
+		args = append(args, "--backend", opts.Backend, "--poll", opts.Poll.String())
+		if opts.Demo {
+			args = append(args, "--demo")
+		}
+	}
 	cmd := exec.CommandContext(ctx, "gjs", args...)
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 6 * time.Second
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
 }

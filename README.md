@@ -23,7 +23,7 @@ If you use the GitHub Copilot app and do not want a different app, use the [Copi
 |-----|----------|--------------|
 | **macOS app** with a menu bar icon | [`Agent-Radar_<version>_macOS.zip`](https://github.com/awlx/agent-radar-app/releases/latest) | macOS 13 or later, Apple silicon or Intel |
 | **Windows app** with a tray icon | [`Agent-Radar_<version>_Windows_x64.zip`](https://github.com/awlx/agent-radar-app/releases/latest) or `_Windows_ARM64.zip` | Windows 10 or Windows 11 |
-| **Linux app** with a GNOME top-bar extension and native window | `Agent-Radar_<version>_Linux_<arch>.tar.gz` (from the next release), or build from source | GNOME Shell 45–51, GJS, GTK 4, WebKitGTK 6, systemd user session |
+| **Linux app** with a GNOME top-bar extension and native window | `Agent-Radar_<version>_Linux_<arch>.tar.gz` (from the next release), or build from source | GNOME Shell 45–51, GJS, GTK 4, WebKitGTK 6 |
 
 On macOS and Windows, each app is one file, and the server and the web UI are in this file:
 
@@ -65,9 +65,10 @@ If the WebView2 Runtime is not available, the app opens the radar in your browse
 ### Install the Linux app
 
 From source, run `sh linux/build-app.sh` and `sh linux/install.sh`.
-Then start `agent-radar.service` in your systemd user session and enable the GNOME extension.
+Then enable the GNOME extension and launch Agent Radar.
 Open **Agent Radar** from the app grid or the top-bar menu.
 The installer does not enable login autostart or install system packages.
+The app manages its backend. Closing the window hides it; **Quit Radar** stops the app-owned backend.
 Refer to [Linux and GNOME](docs/linux.md) for requirements, commands, and Wayland limits.
 
 ### Update from Copilot Radar
@@ -344,6 +345,7 @@ Do not give the output of these endpoints to other persons or to an AI model.
 | `/events` | The snapshot as server-sent events. |
 | `/api/snapshot` | A short JSON summary of the active agents. Add `?all=1` to include idle sessions. |
 | `/api/status` | Cached status counts and waiting-session menu data. Unavailable or stale data returns HTTP 503. |
+| `/api/info` | Backend identity and protocol version for safe native app reuse. |
 | `/api/jump?session=<id>` | `POST` only. Shows the app of a session. Only app or `-gnome` mode has this path, and only on a loopback address. |
 | `/healthz` | A health check. This path does not need a token. |
 

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/awlx/agent-radar-app/internal/collector"
@@ -26,6 +27,10 @@ type Options struct {
 	Version string
 	// ShowWindow shows the radar window at the start. Without it, the app starts with the tray icon only.
 	ShowWindow bool
+	// Linux's primary GTK instance starts or reuses the backend before showing the graph.
+	Backend string
+	Demo    bool
+	Poll    time.Duration
 }
 
 // trayStatus is the data for the menu bar item.

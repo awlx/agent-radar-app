@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -38,6 +39,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	appFlag := flag.Bool("app", false, "show the radar in a native window (Linux requires GJS, GTK 4 and WebKitGTK 6)")
 	gnome := flag.Bool("gnome", false, "run the loopback backend for the Linux GNOME extension and desktop launcher")
+	parentPID := flag.Int("parent-pid", 0, "internal: stop the Linux backend if its owning app exits")
 	background := flag.Bool("background", false, "with -app: start with the menu bar or tray icon only, without the window")
 	demoFlag := flag.Bool("demo", false, "show mock agents instead of the agents on this computer (for screenshots)")
 	os.Args = append(os.Args[:1], withoutPSN(os.Args[1:])...)
@@ -72,6 +74,42 @@ func main() {
 	if *gnome && (runtime.GOOS != "linux" || !loopback) {
 		log.Fatal("-gnome requires Linux and a loopback listener")
 	}
+	if *parentPID < 0 || (*parentPID > 0 && (!*gnome || os.Getppid() != *parentPID)) {
+		log.Fatal("-parent-pid requires the owning Linux app as the actual parent of a -gnome backend")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if *parentPID > 0 {
+		go func() {
+			ticker := time.NewTicker(250 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if os.Getppid() != *parentPID {
+						log.Print("owning Radar app exited; stopping its backend")
+						stop()
+						return
+					}
+				}
+			}
+		}()
+	}
+	if appMode && runtime.GOOS == "linux" {
+		n, err := strconv.Atoi(port)
+		if host != "127.0.0.1" || err != nil || n < 1 || n > 65535 {
+			log.Fatal("the Linux app requires a fixed 127.0.0.1 port")
+		}
+		exe, err := os.Executable()
+		if err != nil {
+			log.Fatal(err)
+		}
+		tray.Run(ctx, tray.Options{URL: localURL(port, ""), Version: version, ShowWindow: !*background,
+			Backend: exe, Demo: *demoFlag, Poll: *poll}, nil)
+		return
+	}
 	if loopback {
 		*token = ""
 	} else if !*noAuth && *token == "" {
@@ -99,8 +137,6 @@ func main() {
 	}
 	_, port, _ = net.SplitHostPort(ln.Addr().String())
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	go hub.Run(ctx)
 
 	printURLs(host, port, *token, loopback)

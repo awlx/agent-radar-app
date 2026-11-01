@@ -128,6 +128,10 @@ func (h *Hub) Unsubscribe(ch chan []byte) {
 // the app of a session: jump gets the JSON state and the ID of the session.
 func NewHandler(h *Hub, token string, loopback bool, jump func(state []byte, id string) bool) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"app":"agent-radar","schema":1}`))
+	})
 	page := uiHTML
 	if jump != nil {
 		page = bytes.Replace(uiHTML, []byte("<body>"), []byte("<body data-jump>"), 1)

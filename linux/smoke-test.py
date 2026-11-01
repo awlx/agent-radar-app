@@ -42,7 +42,7 @@ GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
                 throw new Error('The window used persistent storage');
             print('PASS: native GTK window, live demo graph, ephemeral storage, no demo jump');
             passed = true;
-            window.close();
+            app.activate_action('quit', null);
         } catch (error) {
             printerr(error.message);
         }
@@ -59,7 +59,7 @@ app.run([]);
 if (!passed)
     throw new Error('Native smoke test failed');
 """
-    source = "import GLib from 'gi://GLib';\n" + source.replace("app.run([]);", checks)
+    source = source.replace("app.run([]);", checks)
     with tempfile.TemporaryDirectory(prefix="agent-radar-native-test-") as tmp:
         script = pathlib.Path(tmp) / "smoke.js"
         script.write_text(source)
