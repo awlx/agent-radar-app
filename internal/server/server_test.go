@@ -79,9 +79,10 @@ func TestJump(t *testing.T) {
 		got = append(got, id)
 		return id == "known" && strings.Contains(string(state), `"known"`)
 	})
-	if !strings.Contains(page(on), "<body data-jump>") {
+	if !strings.Contains(page(on), "<body data-jump") {
 		t.Fatal("the page must tell the UI that jump is on")
 	}
+
 	if c := post(on, ""); c != http.StatusForbidden {
 		t.Fatalf("no origin: %d", c)
 	}
@@ -112,6 +113,7 @@ func TestAuth(t *testing.T) {
 		if mod != nil {
 			mod(r)
 		}
+
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		return w

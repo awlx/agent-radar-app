@@ -607,6 +607,62 @@ test("details offer accessible focus actions without app support and escape sess
   assert.equal(document.activeElement, elements.get("showIdle"));
 });
 
+test("Linux does not offer unsupported terminal or unsaved-window jumps", () => {
+  const { api, elements } = graph(1000, 500, true);
+  elements.get("body").dataset = { jump: "", jumpLinux: "" };
+  const cli = { ...session("cli"), pid: 42 };
+  const app = { ...session("app"), surface: "Copilot app" };
+  const saved = { ...session("saved"), kind: "vscode-chat", surface: "Code chat", folders: ["/demo"] };
+  const unsaved = { ...saved, id: "unsaved", folders: ["/demo/a", "/demo/b"] };
+  api.build(snapshot(cli, app, saved, unsaved));
+  assert.doesNotMatch(api.sessionActions(cli), /Show app/);
+  assert.doesNotMatch(api.sessionActions(unsaved), /Show app/);
+  assert.match(api.sessionActions(app), /Show app/);
+  assert.match(api.sessionActions(saved), /Show app/);
+  const agent = { ...session("agent"), surface: "VS Code agent", cwd: "/demo/a/sub", pid: 42 };
+  const snap = snapshot(agent);
+  snap.ides = [
+    { id: "far", ide: "Visual Studio Code", folders: ["/demo"] },
+    { id: "near", ide: "Visual Studio Code", folders: ["/demo/a", "/demo/b"] },
+  ];
+  api.build(snap);
+  assert.doesNotMatch(api.sessionActions(agent), /Show app/);
+  snap.ides[1].workspace = "/demo/saved.code-workspace";
+  api.build(snap);
+  assert.match(api.sessionActions(agent), /Show app/);
+});
+
+test("a connected native graph never labels old or invalid snapshots as live", () => {
+  let now = 1800000000000, stream, timer;
+  const conn = { textContent: "" }, live = { classList: { toggle() {} } };
+  const sandbox = {
+    document: { getElementById: id => id === "conn" ? conn : live },
+    Date: { now: () => now },
+    EventSource: class { constructor() { stream = this; this.readyState = 1; } },
+    setInterval(fn) { timer = fn; },
+  };
+  vm.createContext(sandbox);
+  const liveSource = html.split("function setConn(ok, text)")[1].split("// ---------- Demo mode")[0];
+  vm.runInContext(`let snapshot; function build(data) { snapshot = data; }
+    function setConn(ok, text)${liveSource}\nconnect();`, sandbox);
+  stream.onopen();
+  assert.match(conn.textContent, /waiting/);
+  stream.onmessage({data: JSON.stringify({now, sessions: []})});
+  assert.equal(conn.textContent, "live");
+  now += 10001;
+  timer();
+  assert.match(conn.textContent, /stale/);
+  stream.onmessage({data: JSON.stringify({now, sessions: []})});
+  assert.equal(conn.textContent, "live");
+  stream.onmessage({data: "invalid"});
+  assert.match(conn.textContent, /invalid/);
+  timer();
+  assert.notEqual(conn.textContent, "live");
+  stream.readyState = 0;
+  stream.onerror();
+  assert.match(conn.textContent, /disconnected/);
+});
+
 test("Show app reuses the encoded guarded POST and reports launch and network failures", async () => {
   const { api, elements, requests, setFetch } = graph(1000, 500, true);
   const btn = { dataset: { session: "session/with ?query" } };

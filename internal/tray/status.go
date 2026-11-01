@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -126,12 +127,49 @@ func shortCount(n int64) string {
 
 // radarState is the part of the JSON state of the radar that the app uses.
 type radarState struct {
+	Now      int64          `json:"now"`
 	Sessions []radarSession `json:"sessions"`
 	IDEs     []struct {
 		IDE       string   `json:"ide"`
 		Folders   []string `json:"folders"`
 		Workspace string   `json:"workspace"`
 	} `json:"ides"`
+}
+
+// MenuSnapshot contains only the data needed by an external status icon.
+type MenuSnapshot struct {
+	Schema  int           `json:"schema"`
+	Now     int64         `json:"now"`
+	Working int           `json:"working"`
+	Waiting int           `json:"waiting"`
+	Waits   []MenuSession `json:"waits"`
+}
+
+type MenuSession struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Jumpable bool   `json:"jumpable"`
+}
+
+func MenuState(state []byte, jumpEnabled bool) (MenuSnapshot, error) {
+	var snap radarState
+	if err := json.Unmarshal(state, &snap); err != nil {
+		return MenuSnapshot{}, err
+	}
+	st := statusOf(state)
+	out := MenuSnapshot{Schema: 1, Now: snap.Now, Working: st.working, Waiting: st.waiting, Waits: []MenuSession{}}
+	for _, s := range snap.Sessions {
+		if !s.Waiting {
+			continue
+		}
+		t := snap.target(&s)
+		canJump := t.url != "" || t.editor != "" || t.pid > 0
+		if runtime.GOOS == "linux" {
+			canJump = t.url != "" || (editorBundles[t.editor] != "" && t.folder != "")
+		}
+		out.Waits = append(out.Waits, MenuSession{ID: s.ID, Title: t.title, Jumpable: jumpEnabled && canJump})
+	}
+	return out, nil
 }
 
 type radarSession struct {

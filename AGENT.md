@@ -23,6 +23,11 @@ This file tells an AI agent how to install, start, and remove `agent-radar` for 
 
 ## Start
 
+For a native GNOME top bar and desktop window on Linux, follow [Linux and GNOME](docs/linux.md).
+Check the runtime libraries, build with `sh linux/build-app.sh`, and install with `sh linux/install.sh`.
+Start the user service only after stopping an older server on port 47900.
+Do not enable login autostart, install system packages, or restart the desktop without the user's decision.
+
 1. Start the server. The command runs in the foreground until you stop it with Ctrl+C.
    To keep the server running, start it in a separate terminal or as a background task:
 

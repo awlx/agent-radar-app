@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -35,14 +36,15 @@ func main() {
 	snapshot := flag.Bool("snapshot", false, "print a JSON summary of the agents and exit")
 	all := flag.Bool("all", false, "with -snapshot: include idle sessions")
 	showVersion := flag.Bool("version", false, "print the version and exit")
-	appFlag := flag.Bool("app", false, "show the radar in a window with a menu bar icon (macOS) or a tray icon (Windows)")
+	appFlag := flag.Bool("app", false, "show the radar in a native window (Linux requires GJS, GTK 4 and WebKitGTK 6)")
+	gnome := flag.Bool("gnome", false, "run the loopback backend for the Linux GNOME extension and desktop launcher")
 	background := flag.Bool("background", false, "with -app: start with the menu bar or tray icon only, without the window")
 	demoFlag := flag.Bool("demo", false, "show mock agents instead of the agents on this computer (for screenshots)")
 	os.Args = append(os.Args[:1], withoutPSN(os.Args[1:])...)
 	flag.Parse()
 	appMode := *appFlag || inAppBundle() || appBuild == "true"
 	if appMode && !tray.Supported {
-		log.Fatal("-app needs Windows, or macOS and a build with cgo")
+		log.Fatal("-app needs Linux with GJS/GTK/WebKit, Windows, or macOS with cgo")
 	}
 	listenSet := false
 	flag.Visit(func(f *flag.Flag) { listenSet = listenSet || f.Name == "listen" })
@@ -67,6 +69,9 @@ func main() {
 		log.Fatalf("invalid -listen %q: %v", *listen, err)
 	}
 	loopback := server.IsLoopbackHost(host)
+	if *gnome && (runtime.GOOS != "linux" || !loopback) {
+		log.Fatal("-gnome requires Linux and a loopback listener")
+	}
 	if loopback {
 		*token = ""
 	} else if !*noAuth && *token == "" {
@@ -76,7 +81,7 @@ func main() {
 	hub := server.NewHub(col, *poll)
 	// Only the app on this computer can show the app of a session. A LAN client must not move windows here.
 	var jump func([]byte, string) bool
-	if appMode && loopback && !*demoFlag {
+	if (appMode || *gnome) && loopback && !*demoFlag {
 		jump = tray.Jump
 	}
 	srv := &http.Server{
@@ -85,7 +90,7 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	ln, err := net.Listen("tcp", *listen)
-	if err != nil && appMode && !listenSet {
+	if err != nil && appMode && !listenSet && runtime.GOOS != "linux" {
 		// Another agent-radar can use the default port. The app then uses a free port.
 		ln, err = net.Listen("tcp", net.JoinHostPort(host, "0"))
 	}

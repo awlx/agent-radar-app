@@ -13,11 +13,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/awlx/agent-radar-app/internal/collector"
+	"github.com/awlx/agent-radar-app/internal/tray"
 )
 
 //go:embed ui/ui.html
@@ -129,6 +131,9 @@ func NewHandler(h *Hub, token string, loopback bool, jump func(state []byte, id 
 	page := uiHTML
 	if jump != nil {
 		page = bytes.Replace(uiHTML, []byte("<body>"), []byte("<body data-jump>"), 1)
+		if runtime.GOOS == "linux" {
+			page = bytes.Replace(page, []byte("<body data-jump>"), []byte("<body data-jump data-jump-linux>"), 1)
+		}
 		mux.HandleFunc("POST /api/jump", func(w http.ResponseWriter, r *http.Request) {
 			// Browsers send Origin with each POST, and secure checks it. A request without Origin is not from the UI.
 			if r.Header.Get("Origin") == "" {
@@ -142,6 +147,20 @@ func NewHandler(h *Hub, token string, loopback bool, jump func(state []byte, id 
 			w.WriteHeader(http.StatusNoContent)
 		})
 	}
+	mux.HandleFunc("GET /api/status", func(w http.ResponseWriter, r *http.Request) {
+		status, err := tray.MenuState(h.State(), jump != nil && loopback)
+		if err != nil || status.Now == 0 {
+			http.Error(w, "Radar status is not ready", http.StatusServiceUnavailable)
+			return
+		}
+		maxAge := max(10*time.Second, 5*h.interval)
+		if age := time.Since(time.UnixMilli(status.Now)); age > maxAge || age < -time.Minute {
+			http.Error(w, "Radar status is stale", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(status)
+	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(page)

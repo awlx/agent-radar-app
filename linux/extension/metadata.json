@@ -1,0 +1,8 @@
+{
+  "uuid": "agent-radar@awlx.github.io",
+  "name": "Agent Radar",
+  "description": "Local agent status and waiting sessions, with a native Radar window.",
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "url": "https://github.com/awlx/agent-radar-app",
+  "version": 1
+}

@@ -28,6 +28,7 @@ jobs:
         with:
           node-version: 22
       - run: node --test internal/server/ui/graph.test.mjs
+      - run: node --test linux/extension/status.test.mjs
 
   macos-app:
     runs-on: macos-latest
