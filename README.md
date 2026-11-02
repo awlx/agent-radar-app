@@ -14,7 +14,8 @@ The screenshot shows mock data from the demo mode.
 
 ## Download the app
 
-**The app contains everything.** Download it, open it, and the radar starts.
+**The macOS and Windows apps contain everything.** Download one, open it, and the radar starts.
+The Linux app uses the desktop's GJS, GTK 4, and WebKitGTK 6 runtime libraries.
 
 If you use the GitHub Copilot app and do not want a different app, use the [Copilot app extension](#use-the-copilot-app-extension) instead.
 
@@ -22,8 +23,9 @@ If you use the GitHub Copilot app and do not want a different app, use the [Copi
 |-----|----------|--------------|
 | **macOS app** with a menu bar icon | [`Agent-Radar_<version>_macOS.zip`](https://github.com/awlx/agent-radar-app/releases/latest) | macOS 13 or later, Apple silicon or Intel |
 | **Windows app** with a tray icon | [`Agent-Radar_<version>_Windows_x64.zip`](https://github.com/awlx/agent-radar-app/releases/latest) or `_Windows_ARM64.zip` | Windows 10 or Windows 11 |
+| **Linux app** with a GNOME top-bar extension and native window | `Agent-Radar_<version>_Linux_<arch>.tar.gz` (from the next release), or build from source | GNOME Shell 45–51, GJS, GTK 4, WebKitGTK 6 |
 
-Each app is one file, and the server and the web UI are in this file:
+On macOS and Windows, each app is one file, and the server and the web UI are in this file:
 
 - You do not need Go, a terminal, or a different server.
 - You do not need to install the Copilot app or the Copilot CLI. The app reads only the session files that are on the computer.
@@ -59,6 +61,15 @@ To keep the radar icon on the taskbar, open **Settings > Personalization > Taskb
 
 The Windows app shows the radar in a Microsoft Edge WebView2 window. Windows 10 and Windows 11 usually have the WebView2 Runtime.
 If the WebView2 Runtime is not available, the app opens the radar in your browser.
+
+### Install the Linux app
+
+From source, run `sh linux/build-app.sh` and `sh linux/install.sh`.
+Then enable the GNOME extension and launch Agent Radar.
+Open **Agent Radar** from the app grid or the top-bar menu.
+The installer does not enable login autostart or install system packages.
+The app manages its backend. Closing the window hides it; **Quit Radar** stops the app-owned backend.
+Refer to [Linux and GNOME](docs/linux.md) for requirements, commands, and Wayland limits.
 
 ### Update from Copilot Radar
 
@@ -105,7 +116,7 @@ These operating systems are supported:
 
 | Part | macOS | Windows | Linux |
 |------|-------|---------|-------|
-| App with a status icon and a window | Yes, macOS 13 or later | Yes, Windows 10 or later | No |
+| App with a status icon and a window | Yes, macOS 13 or later | Yes, Windows 10 or later | Yes, GNOME; tested on Shell 51 with Wayland |
 | Command-line tool, server, and web UI | Yes | Yes | Yes |
 
 ## Features
@@ -122,6 +133,7 @@ These operating systems are supported:
 - A side panel with the details of the selected item. In the app, the details of a session have a **Show app** button.
 - Session context actions to focus the radar on one session and its descendants, or show the session's app.
 - A status icon in the macOS menu bar or in the Windows notification area.
+- A GNOME top-bar status icon and a native GTK/WebKit graph window on Linux.
 - A JSON summary for scripts and for AI agents.
 
 If the operating system is set to reduce motion, the UI does not show animations.
@@ -272,7 +284,8 @@ The demo mode does not read your session files.
 | `-all` | `false` | With `-snapshot`, include the idle sessions. |
 | `-demo` | `false` | Show mock agents. Use this mode for screenshots. |
 | `-version` | `false` | Print the version and stop. |
-| `-app` | `false` | Show the radar in a window with a status icon. This flag needs macOS or Windows. |
+| `-app` | `false` | Show the radar in a native window. Linux needs GJS, GTK 4, and WebKitGTK 6; use the desktop launcher for the GNOME top bar. |
+| `-gnome` | `false` | Run the Linux loopback backend for the GNOME extension and desktop launcher. |
 | `-background` | `false` | With the app, start with the status icon only, without the window. |
 
 The apps accept the same flags. For example, `"Agent Radar.exe" -demo` starts the Windows app with mock data.
@@ -331,7 +344,9 @@ Do not give the output of these endpoints to other persons or to an AI model.
 | `/state` | The full snapshot as JSON. |
 | `/events` | The snapshot as server-sent events. |
 | `/api/snapshot` | A short JSON summary of the active agents. Add `?all=1` to include idle sessions. |
-| `/api/jump?session=<id>` | `POST` only. Shows the app of a session. Only the app has this path, and only on a loopback address. |
+| `/api/status` | Cached status counts and waiting-session menu data. Unavailable or stale data returns HTTP 503. |
+| `/api/info` | Backend identity and protocol version for safe native app reuse. |
+| `/api/jump?session=<id>` | `POST` only. Shows the app of a session. Only app or `-gnome` mode has this path, and only on a loopback address. |
 | `/healthz` | A health check. This path does not need a token. |
 
 ## Project layout
@@ -345,6 +360,7 @@ Do not give the output of these endpoints to other persons or to an AI model.
 | `internal/demo` | The mock data for `-demo`. |
 | `macos` | The `Info.plist` file, the icon generator, and the build script of the macOS app. |
 | `windows` | The build script of the Windows app. |
+| `linux` | The GNOME Shell extension, user-local installer, and native window checks. |
 | `scripts` | The script that builds the release files. |
 | `docs` | More documentation. |
 | `docs/images` | The screenshots. |
@@ -362,6 +378,9 @@ The script makes `dist/Agent Radar.app`.
 To build the Windows app, run `./windows/build-app.sh`. You can run this script on macOS, Linux, or Windows.
 The script makes `dist/windows/amd64/Agent Radar.exe` and `dist/windows/arm64/Agent Radar.exe`.
 The build does not need cgo.
+
+To build the Linux app, run `sh linux/build-app.sh`. The build does not need cgo.
+Refer to [Linux and GNOME](docs/linux.md) for native runtime checks.
 
 To make new screenshots, start `agent-radar -demo` and use a browser at a width of 1440 pixels.
 Do not make screenshots with real session data, because the data can contain private names and paths.

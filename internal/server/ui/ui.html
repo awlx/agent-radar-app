@@ -666,7 +666,27 @@ function closeSessionMenu(restore = false) {
   }
 }
 function canShowApp(s) {
-  return "jump" in (document.body.dataset || {}) && (s.surface === "Copilot app" || s.kind === "vscode-chat" || s.pid > 0);
+  const data = document.body.dataset || {};
+  if ("jumpLinux" in data) {
+    if (s.surface === "Copilot app") return true;
+    if (s.kind === "vscode-chat")
+      return ["Code chat", "Code - Insiders chat", "Cursor chat", "VSCodium chat"].includes(s.surface) &&
+        !!(s.workspace || s.folders?.length === 1 || (!s.folders?.length && s.cwd));
+    if (s.surface === "VS Code agent" && s.cwd) {
+      let best = null, length = -1;
+      for (const ide of snapshot?.ides || []) {
+        if (!["Visual Studio Code", "Visual Studio Code - Insiders", "Cursor", "VSCodium"].includes(ide.ide)) continue;
+        for (const folder of ide.folders || []) {
+          if (folder && (s.cwd === folder || s.cwd.startsWith(folder.replace(/\/+$/, "") + "/")) && folder.length > length) {
+            best = ide; length = folder.length;
+          }
+        }
+      }
+      return !!best && !!(best.workspace || best.folders?.length === 1);
+    }
+    return false;
+  }
+  return "jump" in data && (s.surface === "Copilot app" || s.kind === "vscode-chat" || s.pid > 0);
 }
 function sessionActions(s, menu = false) {
   const button = (action, text) => `<button type="button"${menu ? ' role="menuitem"' : ""} class="${action === "jump" ? "jump" : "session-action"}" data-id="${action}:${esc(s.id)}" data-action="${action}" data-session="${esc(s.id)}">${text}</button>`;
@@ -1014,9 +1034,28 @@ function setConn(ok, text) {
 }
 function connect() {
   const es = new EventSource("events");
-  es.onopen = () => setConn(true, "live");
-  es.onmessage = (m) => { setConn(true, "live"); build(JSON.parse(m.data)); };
+  let received = false;
+  const refresh = () => {
+    if (es.readyState !== 1) setConn(false, "disconnected — data is stale");
+    else if (!received) setConn(false, "waiting for current data");
+    else if (!snapshot || Date.now() - snapshot.now > 10000 || snapshot.now - Date.now() > 60000)
+      setConn(false, "data is stale — waiting for an update");
+    else setConn(true, "live");
+  };
+  es.onopen = () => { received = false; refresh(); };
+  es.onmessage = (m) => {
+    try {
+      const data = JSON.parse(m.data);
+      if (!Number.isSafeInteger(data?.now) || !Array.isArray(data?.sessions))
+        throw new Error("Invalid Radar snapshot");
+      build(data); received = true; refresh();
+    } catch {
+      received = false;
+      setConn(false, "invalid data — waiting for an update");
+    }
+  };
   es.onerror = () => setConn(false, "disconnected — data is stale");
+  setInterval(refresh, 2000);
 }
 // ---------- Demo mode (?demo): fabricated data only, no local session data ----------
 function demoSnapshot() {

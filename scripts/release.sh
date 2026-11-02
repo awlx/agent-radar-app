@@ -28,6 +28,16 @@ for target in linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
 	else
 		tar -C "$TMP" -czf "$OUT/$name.tar.gz" "$name"
 	fi
+	if [ "$os" = linux ]; then
+		app="Agent-Radar_${VERSION}_Linux_${arch}"
+		mkdir -p "$TMP/$app/dist/linux" "$TMP/$app/internal/tray" "$TMP/$app/docs"
+		cp "$TMP/$name/agent-radar" "$TMP/$app/dist/linux/"
+		cp -R linux "$TMP/$app/"
+		cp internal/tray/window_linux.js "$TMP/$app/internal/tray/"
+		cp docs/linux.md "$TMP/$app/docs/"
+		cp AGENT.md README.md LICENSE "$TMP/$app/"
+		tar -C "$TMP" -czf "$OUT/$app.tar.gz" "$app"
+	fi
 done
 
 VERSION="$VERSION" ./macos/build-app.sh

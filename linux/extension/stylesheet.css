@@ -1,0 +1,4 @@
+.radar-working, .radar-waiting, .radar-idle, .radar-offline {
+  -st-icon-style: symbolic;
+}
+.radar-session { max-width: 32em; }

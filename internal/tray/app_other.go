@@ -1,4 +1,4 @@
-//go:build !windows && (!darwin || !cgo)
+//go:build !linux && !windows && (!darwin || !cgo)
 
 package tray
 

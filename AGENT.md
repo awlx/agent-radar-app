@@ -23,6 +23,18 @@ This file tells an AI agent how to install, start, and remove `agent-radar` for 
 
 ## Start
 
+For a native GNOME top bar and desktop window on Linux, follow [Linux and GNOME](docs/linux.md).
+Check the runtime libraries. If `dist/linux/agent-radar` is not available, build with
+`sh linux/build-app.sh`. Install with `sh linux/install.sh`.
+The Linux bundle includes the binary, installer, and [Fedora commands](docs/linux.md#fedora-workstation).
+For an already loaded Shell extension, installing changed JavaScript does not update
+the running module. Do not claim the new icon is visible without checking a fresh Shell session.
+Launch **Agent Radar** or run `~/.local/bin/agent-radar-gnome`.
+The app manages its backend; no service or `systemctl` step is needed.
+Closing the window hides it. Use **Quit Radar** to stop the app-owned backend.
+An external compatible server can be reused, but the app must not stop it on Quit.
+Do not enable login autostart, install system packages, or restart the desktop without the user's decision.
+
 1. Start the server. The command runs in the foreground until you stop it with Ctrl+C.
    To keep the server running, start it in a separate terminal or as a background task:
 
