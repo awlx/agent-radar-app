@@ -2,7 +2,9 @@
 
 Agent Radar has a GNOME top-bar extension and a native GTK window.
 The window shows the same full graph as the web UI. It uses WebKitGTK, not a browser tab.
-Launch **Agent Radar**. The app starts its local backend. You do not need a systemd service.
+Enabling the top-bar extension starts **Agent Radar** in the background without a graph window.
+You can also launch **Agent Radar** to show the graph. The app manages its local backend.
+You do not need a systemd service.
 
 ## Requirements
 
@@ -57,14 +59,17 @@ git switch --detach FETCH_HEAD
 sh linux/build-app.sh
 sh linux/install.sh
 gnome-extensions enable agent-radar@awlx.github.io
-~/.local/bin/agent-radar-gnome
 ```
 
 Replace `123` with the pull request number. The app grid also has **Agent Radar**.
-The native window opens and the app manages its backend. There is no `systemctl` step.
+Enabling the extension starts the backend without a window. Check that the top bar becomes
+live before opening the graph. Use the app grid or `~/.local/bin/agent-radar-gnome` to open it.
+The app manages its backend. There is no `systemctl` step.
 If Shell cannot find the extension, use the window now and enable the extension
 after your next normal login. Do not interrupt your work to log out.
-Login autostart stays off.
+If you update an already-loaded extension, test the changed enable behavior after your next
+normal login. Disable/enable does not reload its JavaScript.
+No separate login-autostart entry is added. An enabled extension starts Radar when GNOME enables it at login.
 
 ## App lifecycle
 
@@ -73,11 +78,23 @@ Collection stays in Go, outside GNOME Shell. The window and the extension share 
 D-Bus registration makes repeated or concurrent app launches present the same window;
 they do not start extra backends.
 
+On each enable cycle, the extension requests the desktop launcher's **Start Radar in Background**
+action once. This works at login without first opening the graph. Background requests do not
+open a window or unhide an existing graph. Startup requests and readiness checks are asynchronous.
+The top bar says **Starting Radar in the background** until status is available. If startup
+fails or status does not arrive within 12 seconds, it shows a startup error. **Open Radar**
+shows any native startup error. Background startup failures do not open a window by themselves.
+
 Closing the graph hides the window. The app and status backend keep running.
 **Open Radar** in the top-bar menu, or another launch from the app grid, presents the window.
 Use **Quit Radar** in the window header or the updated top-bar menu to stop the app.
 Quit sends SIGTERM only to the backend that this app started, and waits for it to stop.
 The child also stops if its owning app exits unexpectedly.
+
+Quit is respected. Polling does not restart the app after Quit or a backend failure.
+Use **Open Radar** to start it again, or disable and enable the extension for another
+background launch. Disabling the extension cancels its requests and timers but does not quit
+an app that has already started. This does not add a login-autostart file or a service.
 
 If a compatible Radar server already uses the port, the app reuses it.
 It checks the `/api/info` protocol before loading the graph. Quit does not stop that server.
@@ -86,7 +103,8 @@ success-shaped fallback. The app does not silently choose a different port.
 Demo mode never reuses an external server, because that could show real session data.
 
 Startup requests are asynchronous. A missing executable, failed backend, or startup
-deadline produces an error in the native window. **Reconnect** can start a stopped
+deadline produces an error. For background launches, **Open Radar** shows the stored error
+in the native window. **Reconnect** can start a stopped
 app-owned backend again. It does not stop or replace an external server.
 The window uses temporary browser storage. Stale or disconnected graph data is identified explicitly.
 
@@ -110,7 +128,8 @@ does not register a new UUID with the running Shell. Website installation can re
 extensions inside Shell, but this new extension is not published there.
 Shell 51's old `ReloadExtension` method returns "deprecated and does not work".
 Already imported extension JavaScript also stays cached. Disable/enable is not a
-JavaScript reload. A fresh Shell session can be needed for the new icon or **Quit Radar** menu.
+JavaScript reload. A fresh Shell session can be needed for changed behavior, including
+automatic background startup, icons, and the **Quit Radar** menu.
 Until then, quit from the native window. Do not restart Shell or use unsafe evaluation.
 
 ### Session navigation
@@ -142,7 +161,7 @@ For a separate demo, use `agent-radar -app -demo -listen 127.0.0.1:47901`.
 ```sh
 go test ./...
 go vet ./...
-node --test internal/server/ui/graph.test.mjs linux/extension/status.test.mjs
+node --test internal/server/ui/graph.test.mjs linux/extension/status.test.mjs linux/extension/startup.test.mjs
 sh linux/build-app.sh
 python3 linux/smoke-test.py
 python3 linux/lifecycle-smoke-test.py
@@ -153,15 +172,21 @@ python3 linux/icon-smoke-test.py
 The native checks need a graphical session. The graph check uses demo data.
 The lifecycle check covers ownership, repeated launches, hide/reopen/Quit, external
 server reuse, incompatible servers, missing executables, backend failure, startup
-deadlines, and unexpected owner exit. It uses temporary ports and app IDs.
+deadlines, unexpected owner exit, windowless startup, and background command forwarding
+to hidden or visible primary instances. It uses temporary ports and app IDs.
 The Shell check uses an isolated compositor, D-Bus bus, and temporary configuration.
+With no backend initially running, it enables the extension, checks a windowless app-owned
+backend, quits the app, and checks that polling does not restart it. Disable/re-enable
+cycles check one launch request per enable, status recovery, and cleanup.
 It does not restart your desktop or change its extension settings.
 The icon check needs Python GObject bindings and GTK 3 introspection
 (`python3-gobject` and `gtk3` on Fedora). It checks all badges at 16, 24, and 32 pixels.
 
 For manual testing, close and reopen the graph, then use **Quit Radar**.
 Check that the app-owned server stops and the extension shows disconnected status.
-Launch the app again and check that live status returns.
+Wait at least 5 seconds and check that it stays stopped. Disable and enable the extension
+and check that live status returns without a graph window. Launch the app and check
+that the same instance shows the graph.
 Do not share logs or screenshots with real session names or paths.
 
 ## Remove

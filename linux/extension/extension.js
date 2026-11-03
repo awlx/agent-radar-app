@@ -31,8 +31,11 @@ export default class AgentRadar extends Extension {
         this._session = new Soup.Session({timeout: 4});
         this._cancel = new Gio.Cancellable();
         this._inFlight = false;
+        this._startup = 'starting';
+        this._startupDeadline = GLib.get_monotonic_time() + 12_000_000;
         this._render(null);
         Main.panel.addToStatusArea(this.uuid, this._indicator);
+        this._startBackground();
         this._poll();
         this._timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 2, () => {
             this._poll();
@@ -40,14 +43,28 @@ export default class AgentRadar extends Extension {
         });
     }
 
+    _startBackground() {
+        // Only enable() calls this. Poll failures and deliberate Quit never relaunch the app.
+        try {
+            const desktop = Gio.DesktopAppInfo.new('io.github.awlx.AgentRadar.desktop');
+            if (!desktop?.list_actions().includes('background'))
+                throw new Error('Install the updated Agent Radar desktop launcher first');
+            desktop.launch_action('background', global.create_app_launch_context(0, -1));
+        } catch (error) {
+            this._startup = 'failed';
+            this._render(null);
+            console.error(`Agent Radar background startup: ${error.message}`);
+        }
+    }
+
     _render(data) {
-        const display = displayStatus(data);
+        const display = displayStatus(data, this._startup);
         this._indicator.icon.gicon = this._icons.get(display.icon);
         this._indicator.icon.style_class = `system-status-icon radar-${display.state}`;
         this._indicator.label.text = display.label;
         this._indicator.accessible_name = `Agent Radar: ${display.title}`;
         // Do not replace focused menu items just because the snapshot time changed.
-        const key = JSON.stringify(data ? [data.working, data.waiting, data.waits] : null);
+        const key = JSON.stringify(data ? [data.working, data.waiting, data.waits] : this._startup);
         if (this._menuKey === key)
             return;
         this._menuKey = key;
@@ -82,6 +99,8 @@ export default class AgentRadar extends Extension {
     }
 
     _quit() {
+        this._startup = null;
+        this._startupDeadline = 0;
         const cancel = this._cancel;
         Gio.DBus.session.call(
             'io.github.awlx.AgentRadar', '/io/github/awlx/AgentRadar', 'org.gtk.Actions', 'Activate',
@@ -145,9 +164,13 @@ export default class AgentRadar extends Extension {
             try {
                 if (error)
                     throw error;
-                this._render(readStatus(text));
+                const data = readStatus(text);
+                this._startup = null;
+                this._render(data);
             } catch (failure) {
-                if (this._menuKey !== 'null')
+                if (this._startup === 'starting' && GLib.get_monotonic_time() >= this._startupDeadline)
+                    this._startup = 'failed';
+                if (this._menuKey !== JSON.stringify(this._startup))
                     console.error(`Agent Radar disconnected: ${failure.message}`);
                 this._render(null);
             }
@@ -176,5 +199,7 @@ export default class AgentRadar extends Extension {
         this._statusItem = null;
         this._menuKey = undefined;
         this._icons = null;
+        this._startup = null;
+        this._startupDeadline = 0;
     }
 }

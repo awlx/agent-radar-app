@@ -37,7 +37,7 @@ quote_exec() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/`/\\`/g; s/\$/\
     quote_shell "$APP/window.js"
     printf ' http://127.0.0.1:47900/ --backend '
     quote_shell "$BIN/agent-radar"
-    printf '\n'
+    printf ' "$@"\n'
 } > "$BIN/agent-radar-gnome"
 chmod 755 "$BIN/agent-radar-gnome"
 {
@@ -46,6 +46,8 @@ chmod 755 "$BIN/agent-radar-gnome"
     printf 'Exec="%s"\n' "$(quote_exec "$BIN/agent-radar-gnome")"
     printf 'Icon=network-workgroup-symbolic\nTerminal=false\nCategories=Development;Monitor;\n'
     printf 'StartupWMClass=io.github.awlx.AgentRadar\n'
+    printf 'Actions=background;\n\n[Desktop Action background]\nName=Start Radar in Background\n'
+    printf 'Exec="%s" --background\n' "$(quote_exec "$BIN/agent-radar-gnome")"
 } > "$DATA/applications/io.github.awlx.AgentRadar.desktop"
 if command -v update-desktop-database >/dev/null; then
     update-desktop-database "$DATA/applications"
@@ -53,5 +55,7 @@ fi
 echo "Installed. No service or login autostart was added."
 echo "Start: open Agent Radar from the app grid, or run $BIN/agent-radar-gnome"
 echo "Enable the top bar: gnome-extensions enable agent-radar@awlx.github.io"
+echo "Enabling the updated top bar starts Radar in the background without a window."
 echo "GNOME Shell 51 does not register a new local UUID until a fresh Shell session."
+echo "Already-loaded extension JavaScript also needs a fresh Shell session to update."
 echo "You can use the native window now; enable the top bar after your next login if it is not found."
