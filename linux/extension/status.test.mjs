@@ -45,5 +45,16 @@ test('the desktop installer launches an app-managed backend without a service', 
     const installer = readFileSync(new URL('../install.sh', import.meta.url), 'utf8');
     assert.match(installer, /exec gjs -m/);
     assert.match(installer, /--backend/);
+    assert.match(installer, /Actions=background;/);
+    assert.match(installer, /--background/);
+    assert.match(installer, /"\$@"/);
     assert.doesNotMatch(installer, /systemctl|agent-radar\.service|WantedBy=/);
+});
+
+test('startup and startup failure are explicit, not live or idle', () => {
+    assert.match(displayStatus(null, 'starting').title, /Starting Radar/);
+    assert.match(displayStatus(null, 'failed').title, /could not start/);
+    assert.equal(displayStatus(null, 'starting').state, 'offline');
+    assert.equal(displayStatus(null, 'failed').state, 'offline');
+    assert.equal(displayStatus({...status, waiting: 0}, 'starting').state, 'working');
 });

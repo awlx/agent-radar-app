@@ -13,7 +13,11 @@ export function readStatus(text, now = Date.now()) {
     return data;
 }
 
-export function displayStatus(data) {
+export function displayStatus(data, startup = null) {
+    if (!data && startup === 'starting')
+        return {label: 'Radar ...', title: 'Starting Radar in the background', state: 'offline', icon: 'radar-offline-symbolic.svg'};
+    if (!data && startup === 'failed')
+        return {label: 'Radar !', title: 'Radar could not start - select Open Radar for details', state: 'offline', icon: 'radar-offline-symbolic.svg'};
     if (!data)
         return {label: 'Radar !', title: 'Radar disconnected - data is stale', state: 'offline', icon: 'radar-offline-symbolic.svg'};
     if (data.waiting)

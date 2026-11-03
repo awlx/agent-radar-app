@@ -24,9 +24,10 @@ const demo = ARGV.includes('--demo');
 const app = new Gtk.Application({
     application_id: 'io.github.awlx.AgentRadar' + (address[1] === '47900' ? '' : `.Port${address[1]}`) +
         (demo ? '.Demo' : ''),
-    flags: Gio.ApplicationFlags.DEFAULT_FLAGS,
+    flags: Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
 });
 let background = ARGV.includes('--background');
+let failureMessage = null;
 let window, errorLabel, view;
 let backend = null, starting = false, ready = !backendPath, quitting = false;
 let cancel = null, retry = 0, quitTimer = 0;
@@ -34,11 +35,14 @@ const session = new Soup.Session({timeout: 2});
 const signals = [];
 
 function showError(message) {
+    failureMessage = message;
+    console.error(`Agent Radar: ${message}`);
+    if (background && !window)
+        return;
     createWindow();
     errorLabel.label = message;
     errorLabel.visible = true;
     window.present();
-    console.error(`Agent Radar: ${message}`);
 }
 
 function createWindow() {
@@ -58,7 +62,7 @@ function createWindow() {
     window.set_titlebar(header);
     const box = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
     errorLabel = new Gtk.Label({
-        label: 'Starting Radar...', wrap: true, visible: !!backendPath && !ready,
+        label: failureMessage || 'Starting Radar...', wrap: true, visible: !!failureMessage || (!!backendPath && !ready),
         margin_top: 12, margin_bottom: 12,
     });
     view = new WebKit.WebView({
@@ -136,6 +140,7 @@ function startBackend() {
     const deadline = GLib.get_monotonic_time() + 10_000_000;
     const finish = (state, message) => {
         if (state === 'ready') {
+            failureMessage = null;
             starting = false;
             ready = true;
             if (view)
@@ -241,12 +246,22 @@ app.connect('startup', () => {
         startBackend();
 });
 app.connect('activate', () => {
-    if (background) {
-        background = false;
-        return;
-    }
     createWindow();
     window.present();
+});
+app.connect('command-line', (_app, commandLine) => {
+    // A background request to an existing primary must never present its graph.
+    if (!commandLine.get_arguments().includes('--background')) {
+        background = false;
+        app.activate();
+    }
+    // GJS can retain this object while idle; explicitly release the remote caller.
+    commandLine.set_exit_status(0);
+    if (typeof commandLine.done === 'function')
+        commandLine.done();
+    else
+        commandLine.run_dispose();
+    return 0;
 });
 app.connect('shutdown', () => {
     cancel?.cancel();
@@ -256,4 +271,4 @@ app.connect('shutdown', () => {
     if (backend)
         backend.force_exit();
 });
-app.run([]);
+app.run(['agent-radar', ...ARGV]);

@@ -69,6 +69,8 @@ Then enable the GNOME extension and launch Agent Radar.
 Open **Agent Radar** from the app grid or the top-bar menu.
 The installer does not enable login autostart or install system packages.
 The app manages its backend. Closing the window hides it; **Quit Radar** stops the app-owned backend.
+Enabling the GNOME extension starts Radar in the background without opening the graph.
+It makes one start request per enable cycle; polling does not restart Radar after Quit.
 Refer to [Linux and GNOME](docs/linux.md) for requirements, commands, and Wayland limits.
 
 ### Update from Copilot Radar

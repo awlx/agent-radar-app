@@ -49,11 +49,11 @@ def action(port, name, demo=False):
     ], check=True, capture_output=True, timeout=5)
 
 
-def test_app(tmp, port, backend, case, demo=False):
+def test_app(tmp, port, backend, case, demo=False, background=False):
     state_file = tmp / f"{case}.json"
     script = tmp / f"{case}.js"
     source = (ROOT / "internal/tray/window_linux.js").read_text()
-    source = source.replace("app.run([]);", f"""
+    source = source.replace("app.run(['agent-radar', ...ARGV]);", f"""
 app.connect('startup', () => {{
     const close = new Gio.SimpleAction({{name: 'test-close'}});
     close.connect('activate', () => window?.close());
@@ -61,18 +61,20 @@ app.connect('startup', () => {{
     GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {{
         GLib.file_set_contents({json.dumps(str(state_file))}, JSON.stringify({{
             ready, starting, owned: backend?.get_identifier() || null,
-            visible: !!window?.get_visible(), error: errorLabel?.visible ? errorLabel.label : '',
+            visible: !!window?.get_visible(), error: failureMessage || '',
         }}));
         return GLib.SOURCE_CONTINUE;
     }});
 }});
-app.run([]);
+app.run(['agent-radar', ...ARGV]);
 """)
     script.write_text(source)
     log = (tmp / f"{case}.log").open("w+")
     args = ["gjs", "-m", str(script), f"http://127.0.0.1:{port}/", "--backend", str(backend)]
     if demo:
         args.append("--demo")
+    if background:
+        args.append("--background")
     app = subprocess.Popen(args, stdout=log, stderr=log)
 
     def state():
@@ -117,6 +119,47 @@ with tempfile.TemporaryDirectory(prefix="agent-radar-lifecycle-test-") as direct
         print("PASS: owned backend, close/reopen, three concurrent relaunches, explicit Quit")
 
         port = free_port()
+        app, args, state, log = test_app(tmp, port, BINARY, "background", background=True)
+        apps.append(app)
+        logs.append(log)
+        wait_for(lambda: state().get("ready"), "fresh background app ready")
+        owner = state()["owned"]
+        assert owner and not state()["visible"]
+        remotes = [subprocess.Popen(args, stdout=log, stderr=log) for _ in range(3)]
+        for remote in remotes:
+            assert remote.wait(timeout=10) == 0
+        time.sleep(.3)
+        assert state()["owned"] == owner and not state()["visible"]
+        foreground_args = [arg for arg in args if arg != "--background"]
+        assert subprocess.run(foreground_args, stdout=log, stderr=log, timeout=10).returncode == 0
+        wait_for(lambda: state().get("visible"), "foreground launch presents background primary")
+        assert subprocess.run(args, stdout=log, stderr=log, timeout=10).returncode == 0
+        assert state()["visible"]
+        action(port, "test-close")
+        wait_for(lambda: not state().get("visible"), "background primary hidden again")
+        assert subprocess.run(args, stdout=log, stderr=log, timeout=10).returncode == 0
+        time.sleep(.3)
+        assert not state()["visible"]
+        action(port, "quit")
+        assert app.wait(timeout=8) == 0
+        assert http_info(port) is None
+        print("PASS: fresh/concurrent background starts never open or unhide the graph; normal launch does")
+
+        port = free_port()
+        app, args, state, log = test_app(tmp, port, tmp / "missing", "background-failure", background=True)
+        apps.append(app)
+        logs.append(log)
+        wait_for(lambda: state().get("error") and not state().get("starting"), "background startup reports failure")
+        assert not state()["visible"] and not state()["ready"]
+        assert subprocess.run([arg for arg in args if arg != "--background"],
+                              stdout=log, stderr=log, timeout=10).returncode == 0
+        wait_for(lambda: state().get("visible"), "Open Radar presents background startup error")
+        assert state()["error"]
+        action(port, "quit")
+        assert app.wait(timeout=5) == 0
+        print("PASS: background startup failure stays windowless until Open Radar shows the error")
+
+        port = free_port()
         app, args, state, log = test_app(tmp, port, BINARY, "parent-exit")
         apps.append(app)
         logs.append(log)
@@ -131,11 +174,11 @@ with tempfile.TemporaryDirectory(prefix="agent-radar-lifecycle-test-") as direct
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         servers.append(server)
         wait_for(lambda: http_info(port), "external server ready")
-        app, args, state, log = test_app(tmp, port, BINARY, "external")
+        app, args, state, log = test_app(tmp, port, BINARY, "external", background=True)
         apps.append(app)
         logs.append(log)
         wait_for(lambda: state().get("ready"), "external reuse ready")
-        assert state()["owned"] is None
+        assert state()["owned"] is None and not state()["visible"]
         action(port, "quit")
         assert app.wait(timeout=5) == 0
         assert server.poll() is None and http_info(port)

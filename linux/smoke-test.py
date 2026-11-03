@@ -59,7 +59,7 @@ app.run([]);
 if (!passed)
     throw new Error('Native smoke test failed');
 """
-    source = source.replace("app.run([]);", checks)
+    source = source.replace("app.run(['agent-radar', ...ARGV]);", checks.replace("app.run([]);", "app.run(['agent-radar', ...ARGV]);"))
     with tempfile.TemporaryDirectory(prefix="agent-radar-native-test-") as tmp:
         script = pathlib.Path(tmp) / "smoke.js"
         script.write_text(source)
