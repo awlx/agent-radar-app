@@ -1,6 +1,6 @@
 # Agent Radar
 
-Agent Radar shows a live map of the GitHub Copilot agents that run on your computer.
+Agent Radar shows a live map of local GitHub Copilot sessions and an optional remote Hermes Agent.
 It shows each agent, its sub-agents, the tool that it runs now, and the destinations of its data.
 
 ![The Agent Radar window with mock data](docs/images/radar.png)
@@ -28,9 +28,8 @@ If you use the GitHub Copilot app and do not want a different app, use the [Copi
 On macOS and Windows, each app is one file, and the server and the web UI are in this file:
 
 - You do not need Go, a terminal, or a different server.
-- You do not need to install the Copilot app or the Copilot CLI. The app reads only the session files that are on the computer.
-- The app does not send data to the network. The server listens only on `127.0.0.1`.
-  Exception: if you set a [remote Hermes Agent](docs/hermes.md), the app reads from that Hermes server.
+- You do not need to install the Copilot app or the Copilot CLI. The radar reads their local session files if they are available.
+- The server listens on `127.0.0.1` by default. Remote Hermes collection is off until you configure it.
 
 ### Install the macOS app
 
@@ -102,7 +101,7 @@ The extension needs a version of the GitHub Copilot app that has canvas support.
 
 ## Supported products
 
-Agent Radar reads the local session files of these products:
+Agent Radar reads local Copilot session files and can read a configured remote Hermes server:
 
 | Product | What the radar shows | Status |
 |---------|----------------------|--------|
@@ -122,6 +121,20 @@ These operating systems are supported:
 |------|-------|---------|-------|
 | App with a status icon and a window | Yes, macOS 13 or later | Yes, Windows 10 or later | Yes, GNOME; tested on Shell 51 with Wayland |
 | Command-line tool, server, and web UI | Yes | Yes | Yes |
+
+## Connect a remote Hermes Agent
+
+Hermes support is optional and read-only. It shows sessions, recorded sub-agents, tools,
+data destinations, and model tokens from a Hermes dashboard or API server.
+The radar does not send prompts, run tools, or approve actions on Hermes.
+
+Set the server URL and authentication in `hermes.json` in the Agent Radar config folder,
+then restart Radar. Use HTTPS and keep the file private.
+Refer to [Remote Hermes Agent](docs/hermes.md) for setup, authentication, and limits.
+Remote Hermes sessions do not have **Show app**.
+
+MCP activity identifies the server when the recorded tool name permits it.
+Tool discovery stays separate from actual tool calls; a description request is not execution.
 
 ## Features
 
@@ -313,8 +326,11 @@ CAUTION: LAN mode uses plain HTTP. Other hosts on the same network can read the 
 
 ## Privacy
 
-`agent-radar` reads only local files. It does not send requests to the network.
-Exception: if you set a remote Hermes Agent, `agent-radar` sends read-only requests to that Hermes server. See [Remote Hermes Agent](docs/hermes.md).
+By default, `agent-radar` collects Copilot data from local files.
+If you configure Hermes, it also authenticates with that server and reads remote session data.
+It does not upload local Copilot sessions to Hermes or control remote agents.
+Remote messages and tool arguments can contain private data, just like local session files.
+See [Remote Hermes Agent](docs/hermes.md) for connection security and limits.
 
 `agent-radar` reads these files:
 
@@ -361,6 +377,7 @@ Do not give the output of these endpoints to other persons or to an AI model.
 |--------|----------|
 | `cmd/agent-radar` | The command and its flags. |
 | `internal/collector` | The code that reads the session files of each product. |
+| `internal/hermes` | The optional read-only Hermes client and remote session collector. |
 | `internal/server` | The HTTP server, the server-sent events, and the web UI. |
 | `internal/tray` | The macOS app, the Windows app, and the status icon. |
 | `internal/demo` | The mock data for `-demo`. |
