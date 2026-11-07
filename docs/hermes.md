@@ -53,6 +53,8 @@ The radar only reads. It does not send prompts, commands, or approvals to Hermes
 
 4. Start or restart Agent Radar.
 
+5. On macOS, if the Hermes host is on your local network, macOS asks for the Local Network permission. Select **Allow**. To change it later, open **System Settings > Privacy & Security > Local Network**.
+
 To test the connection, run:
 
 ```sh
@@ -110,3 +112,4 @@ If you set a token, the radar does not use the password.
 | `not a Hermes dashboard or API server` | The URL is wrong. | Use the base URL of the dashboard or API server. |
 | `other users can read this file` | The file mode is too open. | Run `chmod 600` on the file. |
 | `too many login attempts` | Hermes limits the login rate. | Wait, then restart the radar. |
+| `no route to host` (macOS app only) | macOS blocks access to the local network. | Allow Agent Radar in **System Settings > Privacy & Security > Local Network**. |
