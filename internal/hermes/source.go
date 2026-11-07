@@ -228,11 +228,12 @@ func (s *Source) activity(msgs []message, model string, ended bool, now int64, a
 					continue
 				}
 				args := tc.args()
+				desc, raw := describeTool(name, args)
 				id := tc.id()
 				if id == "" {
 					id = name
 				}
-				calls[id] = &pending{tool: collector.Tool{ID: id, Name: name, Desc: collector.DescribeArgs(args), StartedAt: at,
+				calls[id] = &pending{tool: collector.Tool{ID: id, Name: name, Desc: desc, RawDesc: raw, StartedAt: at,
 					AgentID: agentID, Sink: s.sink(name, args)}, at: at}
 				order = append(order, id)
 			}
@@ -247,7 +248,7 @@ func (s *Source) activity(msgs []message, model string, ended bool, now int64, a
 			}
 			delete(calls, id)
 			if p.tool.Sink != "" && now-at < flowWindow {
-				a.flows = append(a.flows, collector.Flow{Sink: p.tool.Sink, Tool: p.tool.Name, Desc: p.tool.Desc, At: p.at, EndAt: at, OK: true, AgentID: agentID})
+				a.flows = append(a.flows, collector.Flow{Sink: p.tool.Sink, Tool: p.tool.Name, Desc: p.tool.Desc, RawDesc: p.tool.RawDesc, At: p.at, EndAt: at, OK: true, AgentID: agentID})
 			}
 		}
 	}
@@ -353,6 +354,38 @@ func firstNonEmpty(xs ...string) string {
 func (s *Source) sink(name string, args map[string]any) string {
 	onHost := func(x string) string { return shortHost(s.cfg.host) + ": " + x }
 	switch {
+	case name == "tool_describe":
+		return discoverySink(toolNames(name, args))
+	case name == "tool_search":
+		return "Tool discovery"
+	case name == "tool_call":
+		names := toolNames(name, args)
+		if len(names) == 0 {
+			return onHost("Tools")
+		}
+		var sinks []string
+		seen := map[string]bool{}
+		entries, _ := args["calls"].([]any)
+		for _, entry := range entries {
+			call, ok := entry.(map[string]any)
+			if !ok {
+				continue
+			}
+			target, _ := call["name"].(string)
+			if target == "" {
+				continue
+			}
+			sink := onHost("Tools")
+			if target != "tool_call" && target != "tool_describe" && target != "tool_search" {
+				targetArgs, _ := call["arguments"].(map[string]any)
+				sink = s.sink(target, targetArgs)
+			}
+			if sink != "" && !seen[sink] {
+				seen[sink] = true
+				sinks = append(sinks, sink)
+			}
+		}
+		return strings.Join(sinks, "; ")
 	case name == "delegate_task" || name == "todo":
 		return ""
 	case name == "clarify":
@@ -375,7 +408,7 @@ func (s *Source) sink(name string, args map[string]any) string {
 	case strings.HasPrefix(name, "skill"):
 		return onHost("Skills")
 	case strings.HasPrefix(name, "mcp_"):
-		if srv, _, ok := strings.Cut(strings.TrimPrefix(name, "mcp_"), "_"); ok && srv != "" {
+		if srv, _ := mcpTool(name); srv != "" {
 			return "MCP: " + srv
 		}
 		return "MCP: unknown server"

@@ -73,6 +73,7 @@ type Tool struct {
 	ID        string `json:"id,omitempty"`
 	Name      string `json:"name"`
 	Desc      string `json:"desc"`
+	RawDesc   string `json:"rawDesc,omitempty"`
 	StartedAt int64  `json:"startedAt"`
 	AgentID   string `json:"agentId,omitempty"`
 	Sink      string `json:"sink,omitempty"`
@@ -82,6 +83,7 @@ type Flow struct {
 	Sink    string `json:"sink"`
 	Tool    string `json:"tool"`
 	Desc    string `json:"desc"`
+	RawDesc string `json:"rawDesc,omitempty"`
 	At      int64  `json:"at"`
 	EndAt   int64  `json:"endAt"`
 	OK      bool   `json:"ok"`

@@ -21,6 +21,14 @@ The "Show app" button is not available for Hermes sessions.
 
 The radar only reads. It does not send prompts, commands, or approvals to Hermes.
 
+MCP calls use `MCP: <server>` destinations when the recorded name has the
+Hermes `mcp__<server>__<tool>` format. This identifies the encoded server label,
+not its network address. Legacy or incomplete names show **MCP: unknown server**.
+Tool description requests use separate **Tool discovery** destinations. They do not
+show the described tools as executed calls. Descriptions and deferred-call batches
+show readable tool names; hover over their activity text or inspect the tool details
+to see the recorded arguments and exact identifiers.
+
 ## Set up
 
 1. Find the URL of the Hermes dashboard (default port `9119`) or of the Hermes API server (default port `8642`).

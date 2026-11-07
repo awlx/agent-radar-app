@@ -436,7 +436,8 @@ func TestSink(t *testing.T) {
 		{"browser_navigate", nil, "Web"},
 		{"clarify", nil, "You"},
 		{"memory", nil, "agent: Memory"},
-		{"mcp_github_list_issues", nil, "MCP: github"},
+		{"mcp_github_list_issues", nil, "MCP: unknown server"},
+		{"mcp__demo_server__browser_navigate", nil, "MCP: demo_server"},
 		{"delegate_task", nil, ""},
 		{"something_new", nil, "agent: Tools"},
 	} {
