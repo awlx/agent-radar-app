@@ -139,11 +139,32 @@ func (*Source) Snapshot() *collector.Snapshot {
 		Tokens: collector.TokenCount{In: 90_000, Out: 4_000}, ModelTokens: usage(sonnet, 90_000, 4_000, 6),
 	}
 
+	const hermesModel = "Hermes 4 405B"
+	remote := &collector.Session{
+		Kind: "hermes", ID: "hermes:hermes.example.com:demo-0006", Live: true, Surface: "Hermes", Remote: "hermes.example.com", Client: "cli",
+		Name: "Summarize the nightly benchmark", Model: hermesModel,
+		Busy: true, LastEventAt: ago(4),
+		LastUser:      "Compare the nightly benchmark with the baseline.",
+		LastAssistant: "I read the results. Now I run the compare script.",
+		RunningTools:  []collector.Tool{{ID: "h1", Name: "terminal", Desc: "$ python compare.py results/", StartedAt: ago(4), Sink: "hermes: Build / run"}},
+		Subagents: []collector.Subagent{
+			{ID: "hermes:demo-0007", Name: "Fetch the baseline", Type: "delegate_task", Model: hermesModel, StartedAt: ago(30), LastAt: ago(3), Doing: "web_extract", Running: true},
+		},
+		Flows: recent(now, []flowSpec{
+			{sink: "LLM: " + hermesModel, tool: "model", desc: hermesModel, model: hermesModel, every: 25000, offset: 4000, tokens: 18_000},
+			{sink: "hermes: Filesystem", tool: "read_file", desc: "results/summary.csv", every: 30000, offset: 12000},
+			{sink: "Web", tool: "web_extract", desc: "https://example.com/baseline", agent: "hermes:demo-0007", every: 35000, offset: 20000},
+		}),
+		Peers:       []collector.Peer{},
+		Tokens:      collector.TokenCount{In: 410_000, Out: 12_000},
+		ModelTokens: usage(hermesModel, 410_000, 12_000, 17),
+	}
+
 	app.ChildSessions = []string{agent.ID}
 	app.Peers = []collector.Peer{{To: agent.ID, At: ago(1800), Kind: "spawn", Text: "Update the API reference"}}
 	return &collector.Snapshot{
 		Now:      now,
-		Sessions: []*collector.Session{app, cli, chat, agent, idle},
+		Sessions: []*collector.Session{app, cli, chat, agent, remote, idle},
 		IDEs: []collector.IDE{
 			{ID: "demo-ide-1", IDE: "Code", Folders: []string{"/Users/demo/src/acme-web"}},
 			{ID: "demo-ide-2", IDE: "Code", Folders: []string{"/Users/demo/src/acme-docs"}},

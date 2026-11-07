@@ -153,11 +153,11 @@
 // Two palettes with a contrast of 3:1 or more on the host background. Colors stay in #rrggbb
 // form, because the renderer adds an alpha suffix.
 const PALETTES = {
-  dark: { app: "#a371f7", vscode: "#2f81f7", cli: "#f778ba", chat: "#39c5cf", other: "#8b949e", llm: "#f2cc60", warn: "#d29922", ok: "#3fb950", bad: "#f85149", back: "#ffffff", hashLit: .65,
+  dark: { app: "#a371f7", vscode: "#2f81f7", cli: "#f778ba", chat: "#39c5cf", hermes: "#f0883e", other: "#8b949e", llm: "#f2cc60", warn: "#d29922", ok: "#3fb950", bad: "#f85149", back: "#ffffff", hashLit: .65,
     sinks: { "GitHub": "#e6edf3", "Git": "#f0883e", "Web": "#58a6ff", "Shell": "#7ee787", "Build / run": "#56d364", "Filesystem": "#d2a8ff", "SSH hosts": "#ffdf5d", "Containers": "#1f9bf0",
       "You": "#d29922", "Session DB": "#8b949e", "Copilot Memory": "#bc8cff", "Memory (local)": "#bc8cff" },
     bars: ["#a371f7", "#2f81f7", "#39c5cf", "#3fb950", "#f778ba", "#d29922", "#ff7b72"] },
-  light: { app: "#8250df", vscode: "#0969da", cli: "#bf3989", chat: "#1b7c83", other: "#6e7781", llm: "#9a6700", warn: "#9a6700", ok: "#1a7f37", bad: "#cf222e", back: "#24292f", hashLit: .32,
+  light: { app: "#8250df", vscode: "#0969da", cli: "#bf3989", chat: "#1b7c83", hermes: "#bc4c00", other: "#6e7781", llm: "#9a6700", warn: "#9a6700", ok: "#1a7f37", bad: "#cf222e", back: "#24292f", hashLit: .32,
     sinks: { "GitHub": "#24292f", "Git": "#bc4c00", "Web": "#0969da", "Shell": "#1a7f37", "Build / run": "#116329", "Filesystem": "#8250df", "SSH hosts": "#7d4e00", "Containers": "#0550ae",
       "You": "#9a6700", "Session DB": "#57606a", "Copilot Memory": "#6639ba", "Memory (local)": "#6639ba" },
     bars: ["#8250df", "#0969da", "#1b7c83", "#1a7f37", "#bf3989", "#9a6700", "#cf222e"] },
@@ -180,11 +180,11 @@ function updateTheme() {
   if (next === P && document.getElementById("legend").innerHTML) return false;
   P = next;
   for (const k of ["ok", "warn", "bad"]) document.body.style.setProperty("--" + k, P[k]);
-  document.getElementById("legend").innerHTML = `<span class="subagent" style="--c:${P.other}">sub-agent (diamond)</span><span class="shell" style="--c:${P.other}">background shell (square)</span>` + [["child session (solid link)", P.other], ["message (one-shot dot)", P.cli], ["Copilot app", P.app], ["VS Code agent", P.vscode], ["VS Code chat", P.chat], ["LLM", P.llm], ["data sink ▢", P.other]]
+  document.getElementById("legend").innerHTML = `<span class="subagent" style="--c:${P.other}">sub-agent (diamond)</span><span class="shell" style="--c:${P.other}">background shell (square)</span>` + [["child session (solid link)", P.other], ["message (one-shot dot)", P.cli], ["Copilot app", P.app], ["VS Code agent", P.vscode], ["VS Code chat", P.chat], ["Hermes (remote)", P.hermes], ["LLM", P.llm], ["data sink ▢", P.other]]
     .map(([n, c]) => `<span style="--c:${c}">${n}</span>`).join("");
   return true;
 }
-const surfaceColor = (s) => ({ "Copilot app": P.app, "VS Code agent": P.vscode, "Copilot CLI": P.cli })[s] || (/chat$/.test(s) ? P.chat : P.other);
+const surfaceColor = (s) => ({ "Copilot app": P.app, "VS Code agent": P.vscode, "Copilot CLI": P.cli, Hermes: P.hermes })[s] || (/chat$/.test(s) ? P.chat : P.other);
 // MCP servers and CLIs get a stable color from a hash of the name.
 const hashColor = (s) => {
   let h = 0; for (const c of s) h = (h * 31 + c.codePointAt(0)) | 0;
@@ -220,7 +220,7 @@ const seenMessages = new Map();
 const LOCAL_SINKS = new Set(["Filesystem", "Session DB", "You", "Memory (local)"]);
 const sinkGroup = (s) => s.startsWith("LLM:") ? 0 : LOCAL_SINKS.has(s) ? 1 : 2;
 const GROUP_NAMES = ["MODELS", "LOCAL MACHINE", "TOOLS & SERVICES"];
-const SURFACE_ORDER = ["Copilot app", "Copilot CLI", "VS Code agent"];
+const SURFACE_ORDER = ["Copilot app", "Copilot CLI", "VS Code agent", "Hermes"];
 let headers = [], groupLabels = [];
 // Honor the system setting to reduce motion: no particles, pulse rings, easing, or smooth scrolling.
 const motionQuery = matchMedia("(prefers-reduced-motion: reduce)");
@@ -739,6 +739,7 @@ function nodeInfo(n, full) {
     const s = n.s;
     if (n.parentSessionID) h += `<div class="m">Child session of ${esc(nodes.get(n.parentSessionID)?.label)}</div>`;
     if (s.contextOnly) h += `<div class="m">Idle parent shown as context for active descendants.</div>`;
+    if (s.remote) h += `<div class="m">🌐 remote · ${esc(s.remote)} (read-only)</div>`;
     h += `<div class="m">${esc(s.surface)} · ${esc(full ? s.cwd || s.repo : s.repo || s.cwd)} ${s.model ? "· " + esc(s.model) : ""} · ${ago(s.lastEventAt)} ago</div>`;
     if (s.lastUser) h += `<div style="margin-top:4px">💬 ${esc(s.lastUser)}</div>`;
     for (const t of full ? s.runningTools : s.runningTools.slice(0, 4)) h += `<div>⚙️ <b>${esc(t.name)}</b> ${esc(t.desc)}</div>`;
@@ -881,8 +882,8 @@ function renderSidebar(snap, sessions, force) {
     const destH = dests.length ? `<div class="meta" title="${esc(dests.join(", "))}">→ ${esc(dests.join(", "))}</div>` : "";
     const open = openSid === "s:" + s.id;
     return `<div class="card ${selected?.id === "s:" + s.id ? "sel" : ""}" style="--c:${c}" ${cardAttrs("s:" + s.id)} aria-expanded="${open}"${open ? ` aria-controls="details"` : ""}>
-      <div class="row"><div class="dot ${st}"></div><div class="name" title="${esc(s.name)}">${esc(s.name)}</div><span class="pill">${esc(s.surface)}</span></div>
-      <div class="meta">${esc(s.repo || s.cwd || "")}${s.model ? " · " + esc(s.model) : ""} · ${ago(s.lastEventAt)} ago</div>
+      <div class="row"><div class="dot ${st}"></div><div class="name" title="${esc(s.name)}">${esc(s.name)}</div><span class="pill" ${s.remote ? `title="remote: ${esc(s.remote)}"` : ""}>${s.remote ? "🌐 " : ""}${esc(s.surface)}</span></div>
+      <div class="meta">${s.remote ? "remote · " + esc(s.remote) + " · " : ""}${esc(s.repo || s.cwd || "")}${s.model ? " · " + esc(s.model) : ""} · ${ago(s.lastEventAt)} ago</div>
       ${doing ? `<div class="doing" title="${esc(doing)}">${esc(doing)}</div>` : ""}${subsH}${shellsH}${destH}</div>${open ? detailsHTML("s:" + s.id) : ""}`;
   }).join("");
   const sinkNodes = [...nodes.values()].filter((n) => n.type === "sink").sort((a, b) => a.ty - b.ty);
@@ -1091,6 +1092,12 @@ function demoSnapshot() {
       modelTokens: { "GPT-5 mini": { in: 260000, out: 9800, calls: 22 } } }),
     sess({ id: "demo-0005", surface: "Copilot CLI", name: "Preview server (agent idle)", cwd: "/home/dev/src/web-portal", repo: "web-portal", busy: false,
       backgroundShells: [{ id: "preview-server", pid: 12345, startedAt: s(3600) }] }),
+    sess({ id: "hermes:hermes.example.com:demo-0006", kind: "hermes", surface: "Hermes", remote: "hermes.example.com", name: "Summarize nightly benchmark results", model: "hermes-4-405b",
+      lastUser: "Compare last night's benchmark with the baseline",
+      runningTools: [{ id: "t6", name: "terminal", desc: "$ python compare.py results/", startedAt: s(4), sink: "hermes: Build / run" }],
+      subagents: [{ id: "hermes:demo-0007", name: "Fetch baseline", type: "delegate_task", model: "hermes-4-70b", startedAt: s(30), lastAt: s(3), running: true, doing: "web_extract" }],
+      flows: [fl("hermes: Filesystem", "read_file", "results/summary.csv", 12), fl("Web", "web_extract", "https://example.com/baseline", 20), llm("hermes-4-405b", 18400, 900, 6)],
+      modelTokens: { "hermes-4-405b": { in: 410000, out: 12000, calls: 17 } } }),
   ];
   return { now, sessions, ides: [{ id: "demo-ide", ide: "Visual Studio Code", pid: 1, folders: ["/home/dev/src/web-portal"] }] };
 }

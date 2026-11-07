@@ -180,3 +180,12 @@ func sessionRoots(s *Session) []string {
 	}
 	return out
 }
+
+// ToolSink gives the data destination of a tool call of a different agent, or "" when the call is not a data flow.
+func ToolSink(name string, args map[string]any) string { return classifyTool(name, args, "", nil) }
+
+// DescribeArgs gives a short text for the arguments of a tool call.
+func DescribeArgs(args map[string]any) string { return describeArgs(args) }
+
+// Trunc removes extra white space and cuts s to n characters.
+func Trunc(s string, n int) string { return trunc(s, n) }
