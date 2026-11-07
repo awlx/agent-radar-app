@@ -20,6 +20,7 @@ import (
 
 	"github.com/awlx/agent-radar-app/internal/collector"
 	"github.com/awlx/agent-radar-app/internal/demo"
+	"github.com/awlx/agent-radar-app/internal/hermes"
 	"github.com/awlx/agent-radar-app/internal/server"
 	"github.com/awlx/agent-radar-app/internal/tray"
 )
@@ -42,6 +43,7 @@ func main() {
 	parentPID := flag.Int("parent-pid", 0, "internal: stop the Linux backend if its owning app exits")
 	background := flag.Bool("background", false, "with -app: start with the menu bar or tray icon only, without the window")
 	demoFlag := flag.Bool("demo", false, "show mock agents instead of the agents on this computer (for screenshots)")
+	hermesURL := flag.String("hermes", "", "URL of a remote Hermes dashboard or API server to show (opt-in; also "+hermes.EnvURL+" or "+hermes.ConfigPath()+")")
 	os.Args = append(os.Args[:1], withoutPSN(os.Args[1:])...)
 	flag.Parse()
 	appMode := *appFlag || inAppBundle() || appBuild == "true"
@@ -55,11 +57,27 @@ func main() {
 		fmt.Println(version)
 		return
 	}
-	var col server.Source = collector.New()
+	var col server.Source
+	var remote *hermes.Source
 	if *demoFlag {
 		col = demo.New()
+	} else {
+		c := collector.New()
+		cfg, err := hermes.LoadConfig(hermes.ConfigPath(), *hermesURL, os.Getenv)
+		if err != nil {
+			log.Printf("hermes: %v; the radar does not show Hermes", err)
+		}
+		if cfg != nil {
+			remote = hermes.New(cfg)
+			c.AddRemote(remote)
+			log.Printf("hermes: reading sessions from %s", cfg.URL)
+		}
+		col = c
 	}
 	if *snapshot {
+		if remote != nil {
+			_ = remote.Refresh(context.Background())
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(collector.Summarize(col.Snapshot(), !*all))
@@ -138,6 +156,9 @@ func main() {
 	_, port, _ = net.SplitHostPort(ln.Addr().String())
 
 	go hub.Run(ctx)
+	if remote != nil {
+		go remote.Run(ctx, max(*poll, 5*time.Second))
+	}
 
 	printURLs(host, port, *token, loopback)
 	if !loopback && *noAuth {

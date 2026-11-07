@@ -44,6 +44,7 @@ type Session struct {
 	ID               string                 `json:"id"`
 	Live             bool                   `json:"live"`
 	Client           string                 `json:"client,omitempty"`
+	Remote           string                 `json:"remote,omitempty"` // the host of a remote agent, for example a Hermes host
 	Surface          string                 `json:"surface"`
 	Name             string                 `json:"name"`
 	Cwd              string                 `json:"cwd"`
@@ -195,6 +196,21 @@ type Collector struct {
 	// The saved workspace files by their root folders, and the change times of the workspaceStorage folders.
 	savedWorkspaces map[string]string
 	storageStamp    string
+
+	remotes []Remote
+}
+
+// Remote gives the sessions of agents on a different computer. Sessions must return fast and must
+// not wait for the network. The remote source fetches its data in the background.
+type Remote interface {
+	Sessions(now int64) []*Session
+}
+
+// AddRemote adds a remote source to the snapshots.
+func (c *Collector) AddRemote(r Remote) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.remotes = append(c.remotes, r)
 }
 
 func New() *Collector {
@@ -219,6 +235,9 @@ func (c *Collector) Snapshot() *Snapshot {
 	now := time.Now().UnixMilli()
 	sessions := c.collectCopilotSessions(now)
 	sessions = append(sessions, c.collectVSCodeChats(now)...)
+	for _, r := range c.remotes {
+		sessions = append(sessions, r.Sessions(now)...)
+	}
 	sort.SliceStable(sessions, func(i, j int) bool {
 		if sessions[i].Busy != sessions[j].Busy {
 			return sessions[i].Busy

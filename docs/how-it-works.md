@@ -52,6 +52,8 @@ If the window is narrow, you can scroll the map. The map does not make the label
   Shell, build, and container commands are in this group, because they can send data to remote systems.
 - The name of an MCP destination is the name of the MCP server.
   If the radar cannot find the server name, the destination is "MCP: unknown server".
+- A destination of a [remote Hermes Agent](hermes.md) that stays on the Hermes computer starts with the host name,
+  for example "agent: Filesystem". Thus it is not in the group "Local machine".
 
 ## Model tokens for VS Code
 

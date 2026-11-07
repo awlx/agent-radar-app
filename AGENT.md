@@ -64,6 +64,9 @@ The output contains session names, folders, repositories, tool names, and data d
 The output does not contain command arguments, because arguments can contain credentials.
 Show only the counts to the user if the user does not ask for more.
 
+To show a remote Hermes Agent, follow [Remote Hermes Agent](docs/hermes.md).
+Do not write the password or the token in a command line, a log, or the chat. Use `hermes.json` with mode `600`.
+
 ## Update
 
 Do the install procedure again.

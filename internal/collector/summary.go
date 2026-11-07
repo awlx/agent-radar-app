@@ -19,6 +19,7 @@ type summarySession struct {
 	ID                     string                 `json:"id"`
 	Name                   string                 `json:"name"`
 	Surface                string                 `json:"surface"`
+	Remote                 string                 `json:"remote,omitempty"`
 	Repo                   string                 `json:"repo"`
 	Model                  string                 `json:"model"`
 	Status                 string                 `json:"status"`
@@ -67,7 +68,7 @@ func Summarize(snap *Snapshot, activeOnly bool) summary {
 		} else if s.Busy {
 			st = "working"
 		}
-		ss := summarySession{ID: s.ID, Name: s.Name, Surface: s.Surface, Repo: s.Repo, Model: s.Model, Status: st,
+		ss := summarySession{ID: s.ID, Name: s.Name, Surface: s.Surface, Remote: s.Remote, Repo: s.Repo, Model: s.Model, Status: st,
 			LastActivitySecondsAgo: (snap.Now - s.LastEventAt) / 1000, RunningTools: []string{}, Subagents: []summarySub{},
 			DataFlowsLast2Min: []string{}, ModelTokens: s.ModelTokens}
 		ss.BackgroundShells = s.BackgroundShells

@@ -30,6 +30,7 @@ On macOS and Windows, each app is one file, and the server and the web UI are in
 - You do not need Go, a terminal, or a different server.
 - You do not need to install the Copilot app or the Copilot CLI. The app reads only the session files that are on the computer.
 - The app does not send data to the network. The server listens only on `127.0.0.1`.
+  Exception: if you set a [remote Hermes Agent](docs/hermes.md), the app reads from that Hermes server.
 
 ### Install the macOS app
 
@@ -110,9 +111,10 @@ Agent Radar reads the local session files of these products:
 | Copilot CLI sessions that VS Code starts ("VS Code agent") | The same data as for the Copilot CLI. | Supported |
 | [Visual Studio Code](https://code.visualstudio.com) and VS Code Insiders, with GitHub Copilot Chat | The chat sessions, the tools, the data flows, and the model tokens. | Supported |
 | Cursor and VSCodium | The chat sessions, if the editor keeps them in the VS Code format. | Not tested |
+| [Hermes Agent](https://github.com/NousResearch/hermes-agent) on a different computer | The sessions, the running tools, the sub-agents, the data flows, and the model tokens. Read-only. Optional. See [Remote Hermes Agent](docs/hermes.md). | Preview |
 
 Agent Radar does not show cloud agents, for example the Copilot coding agent on GitHub.com.
-It shows only the agents that run on the same computer.
+It shows only the agents that run on the same computer, and a remote Hermes Agent if you set one.
 
 These operating systems are supported:
 
@@ -285,6 +287,7 @@ The demo mode does not read your session files.
 | `-snapshot` | `false` | Print a JSON summary of the active agents and stop. |
 | `-all` | `false` | With `-snapshot`, include the idle sessions. |
 | `-demo` | `false` | Show mock agents. Use this mode for screenshots. |
+| `-hermes` | – | The URL of a remote Hermes dashboard or API server. See [Remote Hermes Agent](docs/hermes.md). |
 | `-version` | `false` | Print the version and stop. |
 | `-app` | `false` | Show the radar in a native window. Linux needs GJS, GTK 4, and WebKitGTK 6; use the desktop launcher for the GNOME top bar. |
 | `-gnome` | `false` | Run the Linux loopback backend for the GNOME extension and desktop launcher. |
@@ -311,6 +314,7 @@ CAUTION: LAN mode uses plain HTTP. Other hosts on the same network can read the 
 ## Privacy
 
 `agent-radar` reads only local files. It does not send requests to the network.
+Exception: if you set a remote Hermes Agent, `agent-radar` sends read-only requests to that Hermes server. See [Remote Hermes Agent](docs/hermes.md).
 
 `agent-radar` reads these files:
 
