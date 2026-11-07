@@ -29,6 +29,7 @@ const (
 	toolWindow    = 30 * 60 * 1000 // an open tool call older than this is abandoned
 	thinkWindow   = 10 * 60 * 1000 // a user message without an answer in this window: the model thinks
 	flowWindow    = 120 * 1000
+	staleRun      = 2 * 3600 * 1000 // a cron run without an end after this time is abandoned
 	maxBackoff    = time.Minute
 	fetchDeadline = 20 * time.Second
 )
@@ -47,6 +48,7 @@ type data struct {
 	tops []sessionRow
 	subs map[string][]sessionRow // by parent session ID
 	msgs map[string][]message    // by session ID
+	jobs []cronJob
 }
 
 // New makes a source. It does not connect until Refresh or Run.
@@ -108,8 +110,9 @@ func (s *Source) fetch(ctx context.Context) (*data, error) {
 		subRows = nil // older servers: no sub-agent rows
 	}
 	d := &data{subs: map[string][]sessionRow{}, msgs: map[string][]message{}}
+	d.jobs, _ = s.c.cronJobs(ctx) // older dashboards: no cron API
 	for _, r := range rows {
-		if r.ID != "" && r.Source != "subagent" {
+		if r.ID != "" && r.Source != "subagent" && !leftover(r) {
 			d.tops = append(d.tops, r)
 		}
 	}
@@ -164,7 +167,13 @@ func subRunning(rows []sessionRow, now int64) bool {
 	return false
 }
 
+// leftover tells if a row is an empty cron session that Hermes did not close. It has no title and no messages.
+func leftover(r sessionRow) bool {
+	return r.Source == "cron" && r.EndedAt == 0 && r.MessageCount == 0 && strings.TrimSpace(r.Title) == ""
+}
+
 // Sessions gives the cached sessions in the radar format. It does not wait for the network.
+// Busy sessions come first, so that the limit does not remove them.
 func (s *Source) Sessions(now int64) []*collector.Session {
 	s.mu.Lock()
 	d := s.data
@@ -172,17 +181,57 @@ func (s *Source) Sessions(now int64) []*collector.Session {
 	if d == nil {
 		return nil
 	}
+	running := map[string]int64{} // running cron jobs: name -> start
+	jobs := map[string]cronJob{}
+	for _, j := range d.jobs {
+		if start, ok := j.running(now); ok && j.Name != "" {
+			running[j.Name] = start
+			jobs[j.Name] = j
+		}
+	}
 	var out []*collector.Session
 	for _, r := range d.tops {
-		if len(out) >= maxShown {
-			break
-		}
 		if now-r.last() > showWindow && !subRunning(d.subs[r.ID], now) {
 			continue
 		}
-		out = append(out, s.session(r, d, now))
+		ses := s.session(r, d, now)
+		if r.Source == "cron" && r.EndedAt == 0 {
+			// Hermes names a cron session "<job> · <date>".
+			for name := range running {
+				if strings.HasPrefix(r.Title, name+" · ") {
+					ses.Busy = !ses.Waiting
+					delete(running, name)
+					break
+				}
+			}
+		}
+		out = append(out, ses)
 	}
-	return out
+	for name, start := range running {
+		out = append(out, s.cronSession(jobs[name], start))
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Busy != out[j].Busy {
+			return out[i].Busy
+		}
+		return out[i].LastEventAt > out[j].LastEventAt
+	})
+	return out[:min(len(out), maxShown)]
+}
+
+// cronSession is a running cron job that has no session row yet. Hermes writes the row when the run ends.
+func (s *Source) cronSession(j cronJob, start int64) *collector.Session {
+	repo := ""
+	if j.Workdir != "" {
+		repo = path.Base(strings.ReplaceAll(j.Workdir, `\`, "/"))
+	}
+	return &collector.Session{
+		Kind: "hermes", ID: "hermes:" + s.cfg.host + ":cron:" + j.ID, Live: true, Client: "cron", Surface: Surface, Remote: s.cfg.host,
+		Name: collector.Trunc("cron · "+j.Name, 90), Cwd: j.Workdir, Repo: repo, Model: j.model(), Busy: true,
+		Intent: "Scheduled run", LastEventAt: start,
+		RunningTools: []collector.Tool{}, Subagents: []collector.Subagent{}, Flows: []collector.Flow{}, Peers: []collector.Peer{},
+		ModelTokens: map[string]*collector.ModelUsage{},
+	}
 }
 
 // activity is what the messages of a session tell.
@@ -312,7 +361,13 @@ func (s *Source) session(r sessionRow, d *data, now int64) *collector.Session {
 	if model != "" && (r.InputTokens > 0 || r.OutputTokens > 0) {
 		mt[model] = &collector.ModelUsage{In: int64(r.InputTokens), Out: int64(r.OutputTokens), Calls: int64(r.APICallCount)}
 	}
-	name := firstNonEmpty(r.Title, r.Preview, a.lastUser)
+	name := firstNonEmpty(r.Title, a.lastUser)
+	if r.Source != "cron" { // a cron preview is the system prompt
+		name = firstNonEmpty(r.Title, r.Preview, a.lastUser)
+	}
+	if name == "" && r.Source == "cron" && r.StartedAt > 0 {
+		name = "cron · " + time.UnixMilli(int64(r.StartedAt)).Format("Jan 02 15:04")
+	}
 	if name == "" {
 		name = r.ID[:min(8, len(r.ID))]
 	}

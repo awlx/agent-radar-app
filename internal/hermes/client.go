@@ -390,6 +390,61 @@ func (c *client) query(v url.Values) string {
 	return v.Encode()
 }
 
+// cronJob is a scheduled job of the dashboard. latest_execution tells if a run is in progress.
+type cronJob struct {
+	ID      string          `json:"id"`
+	Name    string          `json:"name"`
+	Model   json.RawMessage `json:"model"`
+	Workdir string          `json:"workdir"`
+	Latest  *struct {
+		Status     string   `json:"status"`
+		ClaimedAt  flexTime `json:"claimed_at"`
+		StartedAt  flexTime `json:"started_at"`
+		FinishedAt flexTime `json:"finished_at"`
+	} `json:"latest_execution"`
+}
+
+// running tells if the latest run of the job is in progress. It gives the start time.
+func (j *cronJob) running(now int64) (int64, bool) {
+	e := j.Latest
+	if e == nil || e.FinishedAt != 0 || (e.Status != "running" && e.Status != "claimed") {
+		return 0, false
+	}
+	start := int64(max(e.StartedAt, e.ClaimedAt))
+	return start, start > 0 && now-start < staleRun
+}
+
+func (j *cronJob) model() string {
+	var s string
+	if json.Unmarshal(j.Model, &s) == nil {
+		return s
+	}
+	return ""
+}
+
+// cronJobs lists the scheduled jobs. Only the dashboard has them; the API server gives nil.
+func (c *client) cronJobs(ctx context.Context) ([]cronJob, error) {
+	k, err := c.detect(ctx)
+	if err != nil || k != kindDashboard {
+		return nil, err
+	}
+	var raw json.RawMessage
+	if err := c.get(ctx, "/api/cron/jobs?"+c.query(url.Values{}), &raw); err != nil {
+		return nil, err
+	}
+	var jobs []cronJob
+	if json.Unmarshal(raw, &jobs) != nil {
+		var env struct {
+			Jobs []cronJob `json:"jobs"`
+		}
+		if err := json.Unmarshal(raw, &env); err != nil {
+			return nil, err
+		}
+		jobs = env.Jobs
+	}
+	return jobs, nil
+}
+
 // sessions lists the newest sessions. With subagents, it lists only the delegated child sessions.
 func (c *client) sessions(ctx context.Context, limit int, subagents bool) ([]sessionRow, error) {
 	if _, err := c.detect(ctx); err != nil {

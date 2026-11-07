@@ -7,7 +7,8 @@ This function is optional. It is off until you set a Hermes URL.
 
 | Item | Source in Hermes |
 |------|------------------|
-| Sessions of the last 24 hours, maximum 20 | `GET /api/sessions` |
+| Sessions of the last 24 hours, maximum 20. Working sessions come first. | `GET /api/sessions` |
+| Running cron jobs, with the name `cron · <job>` (dashboard only) | `GET /api/cron/jobs`, field `latest_execution` |
 | Session name, platform (for example `cli`, `cron`, `matrix`), model, folder | The session row |
 | Last request and last answer | `GET /api/sessions/{id}/messages` |
 | Running tools and data destinations | Tool calls without a result |
@@ -110,6 +111,9 @@ If you set a token, the radar does not use the password.
 - A tool call without a result for more than 30 minutes does not show as running.
 - Live sub-agent details from the Hermes WebSocket are not available. Sub-agents show only when Hermes keeps them as session rows.
 - A continued session (after a reset or a compression) shows as a separate session.
+- A cron job shows as working only while its run is in progress. Short runs can end between two reads. A run without an end after 2 hours does not show as working.
+- The radar does not use the Hermes `is_active` field. Hermes sets it for 5 minutes after the last activity, also when the session waits for the user.
+- The radar does not show empty cron sessions that Hermes did not close (no title and no messages).
 
 ## Troubleshoot
 
