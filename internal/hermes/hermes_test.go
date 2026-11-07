@@ -8,10 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/awlx/agent-radar-app/internal/collector"
 )
 
 const (
@@ -28,7 +31,10 @@ type mock struct {
 	logins int
 	expire bool // the next authorized request gets 401 one time
 	paths  []string
-	noSort bool // the server does not know order=recent
+	noSort bool                        // the server does not know order=recent
+	extra  []map[string]any            // more top-level session rows
+	msgs   map[string][]map[string]any // messages of the extra rows
+	jobs   []map[string]any            // cron jobs; nil: the server has no cron API
 }
 
 func (m *mock) authorized(r *http.Request) bool {
@@ -71,6 +77,14 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		m.mu.Unlock()
 		http.SetCookie(w, &http.Cookie{Name: "hermes_session_at", Value: "ok", Path: "/"})
 		write(map[string]any{"ok": true, "next": "/"})
+		return
+	}
+	if r.URL.Path == "/api/cron/jobs" && dash && m.jobs != nil {
+		if !m.authorized(r) {
+			w.WriteHeader(401)
+			return
+		}
+		write(m.jobs)
 		return
 	}
 	if !strings.HasPrefix(r.URL.Path, "/api/sessions") {
@@ -116,7 +130,7 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		envelope("sessions", []map[string]any{
+		envelope("sessions", append([]map[string]any{
 			{"id": "top1", "source": "cli", "model": "hermes-4-405b", "title": "Benchmark summary", "cwd": "/home/me/src/bench",
 				"started_at": now - 600, "last_active": now - 2, "input_tokens": 1200.0, "output_tokens": 300, "api_call_count": 4,
 				"last_activity_at": now - 1, "last_activity_description": "Running the compare script"},
@@ -125,7 +139,7 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			{"id": "old", "source": "cli", "title": "Last week", "started_at": now - 8*86400, "last_active": now - 8*86400, "ended_at": now - 8*86400},
 			{"id": "sub1", "source": "subagent", "parent_session_id": "top1"},
 			{"id": "cont1", "source": "matrix", "parent_session_id": "top2", "title": "Continued chat", "started_at": now - 7200, "last_active": now - 7000, "ended_at": nil},
-		})
+		}, m.extra...))
 	case "/api/sessions/top1/messages":
 		// Newest first, to check the sort. tool_calls is a JSON text, as in the Hermes database.
 		calls, _ := json.Marshal([]map[string]any{
@@ -148,6 +162,11 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			{"role": "assistant", "tool_calls": []map[string]any{{"id": "w1", "function": map[string]any{"name": "web_extract", "arguments": map[string]any{"urls": []string{"https://example.com/baseline"}}}}}, "timestamp": now - 5},
 		})
 	default:
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/sessions/"), "/messages")
+		if v, ok := m.msgs[id]; ok {
+			envelope("messages", v)
+			return
+		}
 		w.WriteHeader(404)
 	}
 }
@@ -447,5 +466,113 @@ func TestSink(t *testing.T) {
 	}
 	if shortHost("192.0.2.10") != "192.0.2.10" || shortHost("a.b.c") != "a" {
 		t.Error("shortHost")
+	}
+}
+
+func TestCronJobs(t *testing.T) {
+	m := &mock{}
+	_, cfg := startMock(t, m)
+	now := m.now
+	iso := func(sec float64) string { return time.UnixMilli(int64(sec * 1000)).Format(time.RFC3339Nano) }
+	m.jobs = []map[string]any{
+		// Running, no session row yet: the radar makes a session from the job.
+		{"id": "j1", "name": "Nightly build", "model": "hermes-4-70b", "workdir": "/srv/build",
+			"latest_execution": map[string]any{"status": "running", "started_at": iso(now - 20), "finished_at": nil}},
+		// Running, with a session row: the row is busy, also if the last message is from the assistant.
+		{"id": "j2", "name": "Report",
+			"latest_execution": map[string]any{"status": "running", "started_at": iso(now - 40), "finished_at": nil}},
+		// Done.
+		{"id": "j3", "name": "Backup", "latest_execution": map[string]any{"status": "completed", "started_at": iso(now - 100), "finished_at": iso(now - 90)}},
+		// A claim without an end for hours: abandoned.
+		{"id": "j4", "name": "Stuck", "latest_execution": map[string]any{"status": "claimed", "claimed_at": iso(now - 3*3600), "finished_at": nil}},
+		// No run yet.
+		{"id": "j5", "name": "New", "model": map[string]any{"name": "x"}},
+	}
+	m.extra = []map[string]any{
+		{"id": "rep", "source": "cron", "title": "Report · Nov 07 16:00", "started_at": now - 40, "last_active": now - 30, "message_count": 2, "is_active": true},
+		{"id": "bak", "source": "cron", "title": "Backup · Nov 07 15:58", "started_at": now - 100, "last_active": now - 90, "ended_at": now - 90, "message_count": 2},
+		// An empty cron row that Hermes did not close. Hermes calls it active for 5 minutes.
+		{"id": "empty1", "source": "cron", "title": nil, "preview": "", "started_at": now - 30, "last_active": now - 30, "message_count": 0, "is_active": true},
+		// An untitled cron row with messages.
+		{"id": "untitled", "source": "cron", "preview": "SYSTEM: scheduled job instructions.", "started_at": now - 500, "last_active": now - 400, "ended_at": now - 400, "message_count": 2},
+		// A chat that answered one minute ago. Hermes calls it active, but it waits for the user.
+		{"id": "chat", "source": "matrix", "title": "Chat", "started_at": now - 300, "last_active": now - 60, "message_count": 2, "is_active": true},
+	}
+	m.msgs = map[string][]map[string]any{
+		"rep":  {{"role": "user", "content": "Write the report.", "timestamp": now - 40}, {"role": "assistant", "content": "Step one is done.", "timestamp": now - 30}},
+		"chat": {{"role": "user", "content": "Hi", "timestamp": now - 70}, {"role": "assistant", "content": "Hello.", "timestamp": now - 60}},
+	}
+	src := New(cfg)
+	if err := src.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := src.Sessions(time.Now().UnixMilli())
+	by := map[string]*collector.Session{}
+	for _, s := range got {
+		by[strings.TrimPrefix(s.ID, "hermes:"+cfg.Host()+":")] = s
+	}
+	if s := by["cron:j1"]; s == nil || !s.Busy || !s.Live || s.Name != "cron · Nightly build" || s.Client != "cron" || s.Model != "hermes-4-70b" || s.Repo != "build" {
+		t.Errorf("running job without a row: %+v", s)
+	}
+	if s := by["rep"]; s == nil || !s.Busy {
+		t.Errorf("running job with a row must be busy: %+v", s)
+	}
+	if by["cron:j2"] != nil {
+		t.Error("a job with a session row must not show two times")
+	}
+	if s := by["bak"]; s == nil || s.Busy {
+		t.Errorf("finished job: %+v", s)
+	}
+	for _, id := range []string{"cron:j3", "cron:j4", "cron:j5", "empty1"} {
+		if by[id] != nil {
+			t.Errorf("%s must not show: %+v", id, by[id])
+		}
+	}
+	if s := by["untitled"]; s == nil || !strings.HasPrefix(s.Name, "cron · ") || strings.Contains(s.Name, "SYSTEM") {
+		t.Errorf("untitled cron name: %+v", s)
+	}
+	if s := by["chat"]; s == nil || s.Busy {
+		t.Errorf("is_active alone must not make a chat busy: %+v", s)
+	}
+	if !got[0].Busy {
+		t.Errorf("busy sessions must come first: %s", got[0].ID)
+	}
+}
+
+func TestBusyFirstUnderLimit(t *testing.T) {
+	m := &mock{}
+	_, cfg := startMock(t, m)
+	now := m.now
+	for i := range maxShown + 5 {
+		m.extra = append(m.extra, map[string]any{"id": "idle" + strconv.Itoa(i), "source": "cli", "title": "Idle", "started_at": now - 50, "last_active": now - 1, "ended_at": now - 1})
+	}
+	m.jobs = []map[string]any{{"id": "j1", "name": "Long job",
+		"latest_execution": map[string]any{"status": "running", "started_at": time.UnixMilli(int64((now - 3000) * 1000)).Format(time.RFC3339), "finished_at": nil}}}
+	src := New(cfg)
+	if err := src.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := src.Sessions(time.Now().UnixMilli())
+	if len(got) != maxShown {
+		t.Fatalf("got %d sessions, want %d", len(got), maxShown)
+	}
+	found := false
+	for _, s := range got {
+		found = found || s.Name == "cron · Long job"
+	}
+	if !found {
+		t.Error("the running job must not be cut by the limit")
+	}
+}
+
+func TestNoCronAPI(t *testing.T) {
+	m := &mock{} // jobs nil: /api/cron/jobs gives 404
+	_, cfg := startMock(t, m)
+	src := New(cfg)
+	if err := src.Refresh(context.Background()); err != nil {
+		t.Fatalf("a missing cron API must not fail the refresh: %v", err)
+	}
+	if n := len(src.Sessions(time.Now().UnixMilli())); n != 3 {
+		t.Errorf("got %d sessions, want 3", n)
 	}
 }
