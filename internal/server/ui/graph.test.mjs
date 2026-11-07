@@ -530,6 +530,32 @@ test("focus changes flush every panel immediately but later updates still defer 
   assert.match(elements.get("models").innerHTML, /New model/);
 });
 
+test("Hermes discovery shows readable names, retains escaped raw inspection and does not imply execution", () => {
+  const { api, elements } = graph(1000, 500, true);
+  const s = session("hermes-demo");
+  s.surface = "Hermes";
+  const desc = "Describe tools: demo: browser navigate; demo: browser evaluate";
+  const rawDesc = '{"names":["mcp__demo__browser_navigate","mcp__demo__browser_evaluate"],"note":"<fabricated>"}';
+  s.runningTools = [{ name: "tool_describe", desc, rawDesc, sink: "Tool discovery: MCP: demo", startedAt: Date.now() }];
+  api.build(snapshot(s));
+  const feed = elements.get("feed").innerHTML;
+  assert.match(feed, /<div>Describe tools: demo: browser navigate; demo: browser evaluate<\/div>/);
+  assert.match(feed, /title="[^"]*mcp__demo__browser_navigate/);
+  assert.match(feed, /&lt;fabricated&gt;/);
+  assert.doesNotMatch(feed, /<fabricated>/);
+  assert.ok(api.nodes.has("k:Tool discovery: MCP: demo"));
+  assert.ok(!api.nodes.has("k:MCP: demo"));
+  const detail = api.nodeInfo(api.nodes.get("s:hermes-demo"), true);
+  assert.match(detail, /tool_describe/);
+  assert.match(detail, /mcp__demo__browser_evaluate/);
+  assert.match(detail, /Describe tools: demo: browser navigate/);
+  s.flows = [{ tool: "tool_describe", desc, rawDesc, sink: "Tool discovery: MCP: demo", endAt: Date.now() }];
+  s.runningTools = [];
+  api.build(snapshot(s));
+  assert.match(elements.get("feed").innerHTML, /mcp__demo__browser_evaluate/);
+  assert.ok(!api.nodes.has("k:MCP: demo"));
+});
+
 test("context actions work on graph and sidebar with keyboard navigation and dismissal", () => {
   const { api, elements, document, emit } = graph(1000, 500, true);
   const root = session("root");

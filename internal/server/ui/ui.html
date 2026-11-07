@@ -742,7 +742,7 @@ function nodeInfo(n, full) {
     if (s.remote) h += `<div class="m">🌐 remote · ${esc(s.remote)} (read-only)</div>`;
     h += `<div class="m">${esc(s.surface)} · ${esc(full ? s.cwd || s.repo : s.repo || s.cwd)} ${s.model ? "· " + esc(s.model) : ""} · ${ago(s.lastEventAt)} ago</div>`;
     if (s.lastUser) h += `<div style="margin-top:4px">💬 ${esc(s.lastUser)}</div>`;
-    for (const t of full ? s.runningTools : s.runningTools.slice(0, 4)) h += `<div>⚙️ <b>${esc(t.name)}</b> ${esc(t.desc)}</div>`;
+    for (const t of full ? s.runningTools : s.runningTools.slice(0, 4)) h += `<div title="${esc(t.rawDesc || t.desc || "")}">⚙️ <b>${esc(t.name)}</b> ${esc(t.desc)}</div>`;
     if (s.lastAssistant) h += `<div class="m" style="margin-top:4px">🤖 ${esc(s.lastAssistant)}</div>`;
     if (s.tokens.in) h += `<div class="m">Σ tokens in tail: ${(s.tokens.in / 1000).toFixed(0)}k in / ${(s.tokens.out / 1000).toFixed(0)}k out</div>`;
     if (full) for (const [m, t] of Object.entries(s.modelTokens || {})) h += `<div class="m">${esc(m)}: ${fmtTok(t?.in)} in / ${fmtTok(t?.out)} out</div>`;
@@ -934,7 +934,7 @@ function renderSidebar(snap, sessions, force) {
       + `<td title="${esc(s.name)}"><b>${esc(s.name)}</b>${who ? ` <span class="agent">› ${esc(who)}</span>` : ""}</td>`
       + `<td class="dest" title="${esc(f.sink)}">${esc(f.sink)}</td>`
       + `<td class="agent">${esc(f.tool || "")}</td>`
-      + `<td class="cmd" title="${esc(f.desc || "")}"><div>${esc(f.desc || "")}</div></td></tr>`;
+      + `<td class="cmd" title="${esc(f.rawDesc || f.desc || "")}"><div>${esc(f.desc || "")}</div></td></tr>`;
   }).join("");
   document.getElementById("feedCount").textContent = evs.length ? `${Math.min(evs.length, 150)} of ${evs.length} events` : "";
   const feed = document.getElementById("feed");
