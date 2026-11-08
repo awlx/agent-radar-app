@@ -22,6 +22,7 @@ const (
 	subMessages   = 20
 	maxTopFetch   = 10
 	maxSubFetch   = 8
+	maxKidSearch  = 4                // searches for new delegate child sessions in one read
 	showWindow    = 24 * 3600 * 1000 // sessions older than this do not show
 	maxShown      = 20
 	recentWindow  = 15 * 60 * 1000 // sessions with activity in this window get their messages
@@ -30,6 +31,7 @@ const (
 	thinkWindow   = 10 * 60 * 1000 // a user message without an answer in this window: the model thinks
 	flowWindow    = 120 * 1000
 	staleRun      = 2 * 3600 * 1000 // a cron run without an end after this time is abandoned
+	cfgEvery      = 5 * time.Minute
 	maxBackoff    = time.Minute
 	fetchDeadline = 20 * time.Second
 )
@@ -42,6 +44,9 @@ type Source struct {
 	mu   sync.Mutex
 	data *data
 	err  error
+
+	delegCfg *delegConfig // the delegation config of Hermes; nil: not known. Read again after cfgEvery.
+	cfgAt    time.Time
 }
 
 type data struct {
@@ -49,6 +54,10 @@ type data struct {
 	subs map[string][]sessionRow // by parent session ID
 	msgs map[string][]message    // by session ID
 	jobs []cronJob
+
+	delegCfg   *delegConfig
+	delegating map[string]bool       // session IDs with running background delegates
+	kids       map[string]sessionRow // child sessions of delegate tasks, by kidKey
 }
 
 // New makes a source. It does not connect until Refresh or Run.
@@ -109,8 +118,15 @@ func (s *Source) fetch(ctx context.Context) (*data, error) {
 	if err != nil {
 		subRows = nil // older servers: no sub-agent rows
 	}
-	d := &data{subs: map[string][]sessionRow{}, msgs: map[string][]message{}}
+	d := &data{subs: map[string][]sessionRow{}, msgs: map[string][]message{}, delegating: map[string]bool{}, kids: map[string]sessionRow{}}
 	d.jobs, _ = s.c.cronJobs(ctx) // older dashboards: no cron API
+	if time.Since(s.cfgAt) > cfgEvery {
+		if c, err := s.c.delegationConfig(ctx); err == nil {
+			s.delegCfg = c
+		}
+		s.cfgAt = time.Now() // also after an error: do not ask on each poll
+	}
+	d.delegCfg = s.delegCfg
 	for _, r := range rows {
 		if r.ID != "" && r.Source != "subagent" && !leftover(r) {
 			d.tops = append(d.tops, r)
@@ -123,8 +139,12 @@ func (s *Source) fetch(ctx context.Context) (*data, error) {
 	}
 	s.mu.Lock()
 	var old map[string][]message
+	var wasDelegating map[string]bool
+	var oldKids map[string]sessionRow
 	if s.data != nil {
 		old = s.data.msgs
+		wasDelegating = s.data.delegating
+		oldKids = s.data.kids
 	}
 	s.mu.Unlock()
 
@@ -140,13 +160,64 @@ func (s *Source) fetch(ctx context.Context) (*data, error) {
 	}
 	sort.SliceStable(d.tops, func(i, j int) bool { return d.tops[i].last() > d.tops[j].last() })
 	n := 0
+	// A session with running background delegates can be quiet for a long time. Read it first,
+	// else the end of its delegates goes unseen.
 	for _, r := range d.tops {
-		if n < maxTopFetch && (now-r.last() < recentWindow || subRunning(d.subs[r.ID], now)) {
+		if n < maxTopFetch && wasDelegating[r.ID] && r.EndedAt == 0 {
 			load(r.ID, topMessages)
 			n++
 		}
 	}
-	n = 0
+	for _, r := range d.tops {
+		if _, done := d.msgs[r.ID]; done {
+			continue
+		}
+		// The first read also takes open sessions that can have running delegates. Later reads know them.
+		first := old == nil && r.EndedAt == 0 && r.Source != "cron" && now-r.last() < delegWindow
+		if n < maxTopFetch && (now-r.last() < recentWindow || subRunning(d.subs[r.ID], now) || first) {
+			load(r.ID, topMessages)
+			n++
+		}
+	}
+	taken := map[string]bool{}
+	for _, k := range oldKids {
+		taken[k.ID] = true
+	}
+	n, searches := 0, 0
+	for _, r := range d.tops {
+		for _, dl := range delegations(d.msgs[r.ID]) {
+			if !dl.running(now, r.EndedAt != 0) {
+				for i := range dl.tasks { // keep the child of an ended task for its model and tokens
+					if k, ok := oldKids[kidKey(r.ID, dl.id, i)]; ok {
+						d.kids[kidKey(r.ID, dl.id, i)] = k
+					}
+				}
+				continue
+			}
+			d.delegating[r.ID] = true
+			for i, t := range dl.tasks {
+				key := kidKey(r.ID, dl.id, i)
+				k, ok := oldKids[key]
+				switch {
+				case ok && t.endAt == 0 && n < maxSubFetch:
+					if fresh, err := s.c.session(ctx, k.ID); err == nil && fresh.ID != "" {
+						k = fresh
+					}
+				case !ok && t.endAt == 0 && searches < maxKidSearch:
+					searches++
+					k, ok = s.c.findChild(ctx, r.ID, t.goal, dl.at, taken)
+				}
+				if !ok {
+					continue
+				}
+				d.kids[key], taken[k.ID] = k, true
+				if t.endAt == 0 && k.EndedAt == 0 && n < maxSubFetch {
+					load(k.ID, subMessages)
+					n++
+				}
+			}
+		}
+	}
 	for _, list := range d.subs {
 		for _, r := range list {
 			if n < maxSubFetch && r.EndedAt == 0 && now-r.last() < recentWindow {
@@ -191,7 +262,7 @@ func (s *Source) Sessions(now int64) []*collector.Session {
 	}
 	var out []*collector.Session
 	for _, r := range d.tops {
-		if now-r.last() > showWindow && !subRunning(d.subs[r.ID], now) {
+		if now-r.last() > showWindow && !subRunning(d.subs[r.ID], now) && !d.delegating[r.ID] {
 			continue
 		}
 		ses := s.session(r, d, now)
@@ -241,6 +312,7 @@ type activity struct {
 	lastRole                string
 	open                    []collector.Tool
 	flows                   []collector.Flow
+	done                    *collector.Tool // the last tool call with a result
 	waiting                 bool
 }
 
@@ -296,6 +368,7 @@ func (s *Source) activity(msgs []message, model string, ended bool, now int64, a
 				continue
 			}
 			delete(calls, id)
+			a.done = &p.tool
 			if p.tool.Sink != "" && now-at < flowWindow {
 				a.flows = append(a.flows, collector.Flow{Sink: p.tool.Sink, Tool: p.tool.Name, Desc: p.tool.Desc, RawDesc: p.tool.RawDesc, At: p.at, EndAt: at, OK: true, AgentID: agentID})
 			}
@@ -348,18 +421,28 @@ func (s *Source) session(r sessionRow, d *data, now int64) *collector.Session {
 		}
 		flows = append(flows, sa.flows...)
 	}
-	sort.SliceStable(subs, func(i, j int) bool { return subs[i].StartedAt < subs[j].StartedAt })
-
-	recent := now-a.lastAt < thinkWindow
-	busy := !ended && !a.waiting && (len(a.open) > 0 || anySub || (recent && (a.lastRole == "user" || a.lastRole == "tool")))
-	running := a.open
-	if running == nil {
-		running = []collector.Tool{}
-	}
 	model := r.Model
 	mt := map[string]*collector.ModelUsage{}
 	if model != "" && (r.InputTokens > 0 || r.OutputTokens > 0) {
 		mt[model] = &collector.ModelUsage{In: int64(r.InputTokens), Out: int64(r.OutputTokens), Calls: int64(r.APICallCount)}
+	}
+	kids := map[string]*kid{}
+	for key, k := range d.kids {
+		if strings.HasPrefix(key, r.ID+":") {
+			kids[key] = &kid{row: k, act: s.activity(d.msgs[k.ID], k.Model, k.EndedAt != 0, now, "hermes:"+key)}
+		}
+	}
+	dr := delegates(r.ID, delegations(d.msgs[r.ID]), d.delegCfg, model, ended, now, mt, kids)
+	subs = append(subs, dr.subs...)
+	flows = append(flows, dr.flows...)
+	anySub = anySub || dr.running
+	sort.SliceStable(subs, func(i, j int) bool { return subs[i].StartedAt < subs[j].StartedAt })
+
+	recent := now-a.lastAt < thinkWindow
+	busy := !ended && !a.waiting && (len(a.open) > 0 || anySub || (recent && (a.lastRole == "user" || a.lastRole == "tool")))
+	running := append(a.open, dr.tools...)
+	if running == nil {
+		running = []collector.Tool{}
 	}
 	name := firstNonEmpty(r.Title, a.lastUser)
 	if r.Source != "cron" { // a cron preview is the system prompt

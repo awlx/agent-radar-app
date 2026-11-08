@@ -13,7 +13,10 @@ This function is optional. It is off until you set a Hermes URL.
 | Last request and last answer | `GET /api/sessions/{id}/messages` |
 | Running tools and data destinations | Tool calls without a result |
 | "Waiting for you" | An open `clarify` tool call |
-| Sub-agents of `delegate_task` | Session rows with the source `subagent` |
+| Background delegates of `delegate_task`, with goal and model | The parent messages: a `delegate_task` result with `"status": "dispatched"` starts them. The `[ASYNC DELEGATION COMPLETE — <id>]` message ends them. |
+| Delegate model | The child session of the delegate. Else the model of the task, the model of the selected delegation backend option, or `delegation.model`, from `GET /api/config` (dashboard only). Else the model of the parent session. Without the config, the model is `unknown`. |
+| Delegate tools, data flows and tokens | The child session of the delegate (dashboard only). `GET /api/sessions/search?source=subagent` finds it by the goal text. `GET /api/sessions/{id}` and its messages give the model, the tokens and the tool calls. Between tool calls, the delegate shows `thinking` and its last tool. The parent session also shows these tools and data flows. |
+| Sub-agents with session rows | Session rows with the source `subagent` |
 | Tokens and model calls | `input_tokens`, `output_tokens`, `api_call_count` |
 
 The radar shows Hermes sessions with the orange color, the 🌐 Hermes label, and `remote · <host>`.
@@ -107,9 +110,14 @@ If you set a token, the radar does not use the password.
 ## Limits
 
 - The radar reads Hermes every 5 seconds. After an error, it waits longer, up to 1 minute.
-- The radar reads the messages of at most 10 recent sessions and 8 running sub-agents in each cycle.
+- The radar reads the messages of at most 10 sessions and 8 running sub-agents in each cycle. Sessions with running delegates come first.
 - A tool call without a result for more than 30 minutes does not show as running.
-- Live sub-agent details from the Hermes WebSocket are not available. Sub-agents show only when Hermes keeps them as session rows.
+- A session with running background delegates shows as working. Each delegate shows as a sub-agent of its parent session.
+- Hermes keeps delegate sessions out of `GET /api/sessions`. The WebSocket method `subagent.list` gives data only to the client that owns the session. Thus the radar uses the search route to find the child session of a delegate. If the search does not find it, the delegate shows "background task" and no tools. The API server has no search route.
+- The radar does 4 searches for new delegates at most in each cycle.
+- If a backend option has fallback providers, the real model can be different. The child session shows the real model when the radar finds it.
+- A background delegate without a completion message for 6 hours does not show as running. A delegate of an ended session does not show.
+- The radar reads `GET /api/config` at most one time in 5 minutes. It keeps only the model names of the `delegation` settings. It does not keep other config values.
 - A continued session (after a reset or a compression) shows as a separate session.
 - A cron job shows as working only while its run is in progress. Short runs can end between two reads. A run without an end after 2 hours does not show as working.
 - The radar does not use the Hermes `is_active` field. Hermes sets it for 5 minutes after the last activity, also when the session waits for the user.
