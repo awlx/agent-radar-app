@@ -13,7 +13,9 @@ This function is optional. It is off until you set a Hermes URL.
 | Last request and last answer | `GET /api/sessions/{id}/messages` |
 | Running tools and data destinations | Tool calls without a result |
 | "Waiting for you" | An open `clarify` tool call |
-| Sub-agents of `delegate_task` | Session rows with the source `subagent` |
+| Background delegates of `delegate_task`, with goal and model | The parent messages: a `delegate_task` result with `"status": "dispatched"` starts them. The `[ASYNC DELEGATION COMPLETE — <id>]` message ends them. |
+| Delegate model | `delegation.model` from `GET /api/config` (dashboard only). If it is empty, the model of the parent session. |
+| Sub-agents with session rows | Session rows with the source `subagent` |
 | Tokens and model calls | `input_tokens`, `output_tokens`, `api_call_count` |
 
 The radar shows Hermes sessions with the orange color, the 🌐 Hermes label, and `remote · <host>`.
@@ -107,9 +109,12 @@ If you set a token, the radar does not use the password.
 ## Limits
 
 - The radar reads Hermes every 5 seconds. After an error, it waits longer, up to 1 minute.
-- The radar reads the messages of at most 10 recent sessions and 8 running sub-agents in each cycle.
+- The radar reads the messages of at most 10 sessions and 8 running sub-agents in each cycle. Sessions with running delegates come first.
 - A tool call without a result for more than 30 minutes does not show as running.
-- Live sub-agent details from the Hermes WebSocket are not available. Sub-agents show only when Hermes keeps them as session rows.
+- A session with running background delegates shows as working. Each delegate shows as a sub-agent of its parent session.
+- The radar does not show the current tool or the tokens of a background delegate. Hermes keeps delegate sessions out of `GET /api/sessions`. The WebSocket method `subagent.list` gives data only to the client that owns the session.
+- A background delegate without a completion message for 6 hours does not show as running. A delegate of an ended session does not show.
+- The radar reads `GET /api/config` at most one time in 5 minutes. It uses only `delegation.model`.
 - A continued session (after a reset or a compression) shows as a separate session.
 - A cron job shows as working only while its run is in progress. Short runs can end between two reads. A run without an end after 2 hours does not show as working.
 - The radar does not use the Hermes `is_active` field. Hermes sets it for 5 minutes after the last activity, also when the session waits for the user.

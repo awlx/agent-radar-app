@@ -30,6 +30,7 @@ const (
 	thinkWindow   = 10 * 60 * 1000 // a user message without an answer in this window: the model thinks
 	flowWindow    = 120 * 1000
 	staleRun      = 2 * 3600 * 1000 // a cron run without an end after this time is abandoned
+	cfgEvery      = 5 * time.Minute
 	maxBackoff    = time.Minute
 	fetchDeadline = 20 * time.Second
 )
@@ -42,6 +43,9 @@ type Source struct {
 	mu   sync.Mutex
 	data *data
 	err  error
+
+	delegModel string // delegation.model of the Hermes config; read again after cfgEvery
+	cfgAt      time.Time
 }
 
 type data struct {
@@ -49,6 +53,9 @@ type data struct {
 	subs map[string][]sessionRow // by parent session ID
 	msgs map[string][]message    // by session ID
 	jobs []cronJob
+
+	delegModel string
+	delegating map[string]bool // session IDs with running background delegates
 }
 
 // New makes a source. It does not connect until Refresh or Run.
@@ -109,8 +116,15 @@ func (s *Source) fetch(ctx context.Context) (*data, error) {
 	if err != nil {
 		subRows = nil // older servers: no sub-agent rows
 	}
-	d := &data{subs: map[string][]sessionRow{}, msgs: map[string][]message{}}
+	d := &data{subs: map[string][]sessionRow{}, msgs: map[string][]message{}, delegating: map[string]bool{}}
 	d.jobs, _ = s.c.cronJobs(ctx) // older dashboards: no cron API
+	if time.Since(s.cfgAt) > cfgEvery {
+		if m, err := s.c.delegationModel(ctx); err == nil {
+			s.delegModel = m
+		}
+		s.cfgAt = time.Now() // also after an error: do not ask on each poll
+	}
+	d.delegModel = s.delegModel
 	for _, r := range rows {
 		if r.ID != "" && r.Source != "subagent" && !leftover(r) {
 			d.tops = append(d.tops, r)
@@ -123,8 +137,10 @@ func (s *Source) fetch(ctx context.Context) (*data, error) {
 	}
 	s.mu.Lock()
 	var old map[string][]message
+	var wasDelegating map[string]bool
 	if s.data != nil {
 		old = s.data.msgs
+		wasDelegating = s.data.delegating
 	}
 	s.mu.Unlock()
 
@@ -140,10 +156,30 @@ func (s *Source) fetch(ctx context.Context) (*data, error) {
 	}
 	sort.SliceStable(d.tops, func(i, j int) bool { return d.tops[i].last() > d.tops[j].last() })
 	n := 0
+	// A session with running background delegates can be quiet for a long time. Read it first,
+	// else the end of its delegates goes unseen.
 	for _, r := range d.tops {
-		if n < maxTopFetch && (now-r.last() < recentWindow || subRunning(d.subs[r.ID], now)) {
+		if n < maxTopFetch && wasDelegating[r.ID] && r.EndedAt == 0 {
 			load(r.ID, topMessages)
 			n++
+		}
+	}
+	for _, r := range d.tops {
+		if _, done := d.msgs[r.ID]; done {
+			continue
+		}
+		// The first read also takes open sessions that can have running delegates. Later reads know them.
+		first := old == nil && r.EndedAt == 0 && r.Source != "cron" && now-r.last() < delegWindow
+		if n < maxTopFetch && (now-r.last() < recentWindow || subRunning(d.subs[r.ID], now) || first) {
+			load(r.ID, topMessages)
+			n++
+		}
+	}
+	for _, r := range d.tops {
+		for _, dl := range delegations(d.msgs[r.ID]) {
+			if dl.running(now, r.EndedAt != 0) {
+				d.delegating[r.ID] = true
+			}
 		}
 	}
 	n = 0
@@ -191,7 +227,7 @@ func (s *Source) Sessions(now int64) []*collector.Session {
 	}
 	var out []*collector.Session
 	for _, r := range d.tops {
-		if now-r.last() > showWindow && !subRunning(d.subs[r.ID], now) {
+		if now-r.last() > showWindow && !subRunning(d.subs[r.ID], now) && !d.delegating[r.ID] {
 			continue
 		}
 		ses := s.session(r, d, now)
@@ -348,6 +384,9 @@ func (s *Source) session(r sessionRow, d *data, now int64) *collector.Session {
 		}
 		flows = append(flows, sa.flows...)
 	}
+	ds, delegRunning := delegates(r.ID, delegations(d.msgs[r.ID]), firstNonEmpty(d.delegModel, r.Model), ended, now)
+	subs = append(subs, ds...)
+	anySub = anySub || delegRunning
 	sort.SliceStable(subs, func(i, j int) bool { return subs[i].StartedAt < subs[j].StartedAt })
 
 	recent := now-a.lastAt < thinkWindow

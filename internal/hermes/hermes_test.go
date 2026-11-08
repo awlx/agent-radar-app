@@ -35,6 +35,7 @@ type mock struct {
 	extra  []map[string]any            // more top-level session rows
 	msgs   map[string][]map[string]any // messages of the extra rows
 	jobs   []map[string]any            // cron jobs; nil: the server has no cron API
+	config map[string]any              // the /api/config document; nil: no config API
 }
 
 func (m *mock) authorized(r *http.Request) bool {
@@ -85,6 +86,14 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		write(m.jobs)
+		return
+	}
+	if r.URL.Path == "/api/config" && dash && m.config != nil {
+		if !m.authorized(r) {
+			w.WriteHeader(401)
+			return
+		}
+		write(m.config)
 		return
 	}
 	if !strings.HasPrefix(r.URL.Path, "/api/sessions") {
@@ -574,5 +583,90 @@ func TestNoCronAPI(t *testing.T) {
 	}
 	if n := len(src.Sessions(time.Now().UnixMilli())); n != 3 {
 		t.Errorf("got %d sessions, want 3", n)
+	}
+}
+
+func TestDelegates(t *testing.T) {
+	m := &mock{config: map[string]any{"delegation": map[string]any{"model": "model-b", "max_concurrent_children": 2}}}
+	_, cfg := startMock(t, m)
+	now := m.now
+	call := func(id string, args string) map[string]any {
+		return map[string]any{"role": "assistant", "content": "", "timestamp": now - 1790,
+			"tool_calls": []map[string]any{{"id": id, "function": map[string]any{"name": "delegate_task", "arguments": args}}}}
+	}
+	result := func(id, content string, at float64) map[string]any {
+		return map[string]any{"role": "tool", "tool_call_id": id, "tool_name": "delegate_task", "content": content, "timestamp": at}
+	}
+	m.extra = []map[string]any{
+		// The last activity is 30 minutes old: the first read must still take its messages.
+		{"id": "par", "source": "matrix", "title": "Review", "model": "model-p", "started_at": now - 4000, "last_active": now - 1780, "message_count": 9},
+		{"id": "done", "source": "matrix", "title": "Ended", "model": "model-p", "started_at": now - 600, "last_active": now - 100, "ended_at": now - 100, "message_count": 3},
+	}
+	m.msgs = map[string][]map[string]any{
+		"par": {
+			call("old", `{"goal":"Old task"}`),
+			result("old", `{"status": "dispatched", "mode": "background", "count": 1, "delegation_id": "deleg_old1", "goals": ["Old task"]}`, now-3500),
+			{"role": "user", "content": "[ASYNC DELEGATION COMPLETE — deleg_old1]\nThe subagent did not complete successfully (status=error).", "timestamp": now - 3000},
+			call("sync", `{"goal":"Quick look"}`),
+			result("sync", `{"results": [{"status": "completed", "summary": "ok"}]}`, now-2500),
+			call("d1", `{"tasks":[{"goal":"Check the docs","model":"model-a"},{"goal":"Run the tests"}]}`),
+			result("d1", `{"status": "dispatched", "mode": "background", "count": 2, "delegation_id": "deleg_new1", "goals": ["Check the docs", "Run the tests"]}`, now-1785),
+			{"role": "assistant", "content": "Two helpers work on it.", "timestamp": now - 1780},
+			{"role": "user", "content": "Is deleg_new1 done?", "timestamp": now - 1779}, // no completion marker
+		},
+		"done": {
+			call("d2", `{"goal":"Lost task"}`),
+			result("d2", `{"status": "dispatched", "delegation_id": "deleg_lost", "goal": "Lost task"}`, now-200),
+		},
+	}
+	src := New(cfg)
+	for range 2 { // the second read keeps the quiet parent
+		if err := src.Refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		by := map[string]*collector.Session{}
+		for _, s := range src.Sessions(time.Now().UnixMilli()) {
+			by[strings.TrimPrefix(s.ID, "hermes:"+cfg.Host()+":")] = s
+		}
+		p := by["par"]
+		if p == nil || !p.Busy {
+			t.Fatalf("a parent with running delegates must be busy: %+v", p)
+		}
+		subs := map[string]collector.Subagent{}
+		for _, sa := range p.Subagents {
+			subs[strings.TrimPrefix(sa.ID, "hermes:par:")] = sa
+		}
+		if sa := subs["deleg_new1:0"]; !sa.Running || sa.Model != "model-a" || sa.Name != "Check the docs" || sa.Type != "delegate_task" || sa.StartedAt != int64((now-1785)*1000) {
+			t.Errorf("first delegate: %+v", sa)
+		}
+		if sa := subs["deleg_new1:1"]; !sa.Running || sa.Model != "model-b" || sa.Name != "Run the tests" {
+			t.Errorf("second delegate must use delegation.model: %+v", sa)
+		}
+		if sa := subs["deleg_old1:0"]; sa.Running || !sa.Failed || sa.EndedAt != int64((now-3000)*1000) {
+			t.Errorf("finished delegate: %+v", sa)
+		}
+		if len(subs) != 3 {
+			t.Errorf("a synchronous delegate_task result is not a background delegate: %v", subs)
+		}
+		if d := by["done"]; d == nil || d.Busy || len(d.Subagents) != 0 {
+			t.Errorf("an ended parent has no running delegates: %+v", d)
+		}
+	}
+}
+
+func TestDelegatesParentModel(t *testing.T) {
+	msgs := []message{
+		{Role: "tool", ToolName: "delegate_task", Content: json.RawMessage(`"<untrusted_tool_result>{\"status\": \"dispatched\", \"delegation_id\": \"deleg_x\", \"count\": 2}"`), Timestamp: 1000},
+	}
+	ds := delegations(msgs)
+	if len(ds) != 1 || len(ds[0].goals) != 2 {
+		t.Fatalf("delegations: %+v", ds)
+	}
+	subs, running := delegates("s", ds, "model-p", false, 2000)
+	if !running || len(subs) != 2 || subs[0].Model != "model-p" || subs[0].Name != "delegate" {
+		t.Errorf("without delegation.model the delegates use the parent model: %+v", subs)
+	}
+	if _, running := delegates("s", ds, "model-p", false, 1000+delegWindow+1); running {
+		t.Error("a delegation without an end must stop after delegWindow")
 	}
 }

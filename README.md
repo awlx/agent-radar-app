@@ -124,7 +124,7 @@ These operating systems are supported:
 
 ## Connect a remote Hermes Agent
 
-Hermes support is optional and read-only. It shows sessions, recorded sub-agents, tools,
+Hermes support is optional and read-only. It shows sessions, background delegates, sub-agents, tools,
 data destinations, and model tokens from a Hermes dashboard or API server.
 The radar does not send prompts, run tools, or approve actions on Hermes.
 
