@@ -36,6 +36,7 @@ type mock struct {
 	msgs   map[string][]map[string]any // messages of the extra rows
 	jobs   []map[string]any            // cron jobs; nil: the server has no cron API
 	config map[string]any              // the /api/config document; nil: no config API
+	kids   []map[string]any            // delegate child sessions: only search and the detail route find them
 }
 
 func (m *mock) authorized(r *http.Request) bool {
@@ -127,6 +128,16 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	switch r.URL.Path {
+	case "/api/sessions/search":
+		q := strings.ToLower(strings.Trim(r.URL.Query().Get("q"), `"`))
+		var res []map[string]any
+		for _, k := range m.kids {
+			if r.URL.Query().Get("source") == "subagent" && strings.Contains(strings.ToLower(k["preview"].(string)), q) {
+				res = append(res, k)
+			}
+		}
+		write(map[string]any{"results": res})
+		return
 	case "/api/sessions":
 		if r.URL.Query().Get("source") == "subagent" {
 			envelope("sessions", []map[string]any{
@@ -172,9 +183,15 @@ func (m *mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 	default:
 		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/sessions/"), "/messages")
-		if v, ok := m.msgs[id]; ok {
+		if v, ok := m.msgs[id]; ok && strings.HasSuffix(r.URL.Path, "/messages") {
 			envelope("messages", v)
 			return
+		}
+		for _, k := range m.kids {
+			if k["id"] == id {
+				write(k)
+				return
+			}
 		}
 		w.WriteHeader(404)
 	}
@@ -587,11 +604,16 @@ func TestNoCronAPI(t *testing.T) {
 }
 
 func TestDelegates(t *testing.T) {
-	m := &mock{config: map[string]any{"delegation": map[string]any{"model": "model-b", "max_concurrent_children": 2}}}
+	m := &mock{config: map[string]any{"delegation": map[string]any{
+		"model": "model-b", "provider": "p1", "api_key": "not-read", "max_concurrent_children": 2, "backend": "map",
+		"backends": map[string]any{"map": map[string]any{"default": "main", "options": []any{
+			map[string]any{"name": "main", "model": "model-main", "provider": "p1"},
+			map[string]any{"name": "deep", "model": "model-deep", "provider": "p2"},
+		}}}}}}
 	_, cfg := startMock(t, m)
 	now := m.now
-	call := func(id string, args string) map[string]any {
-		return map[string]any{"role": "assistant", "content": "", "timestamp": now - 1790,
+	call := func(id string, args string, at float64) map[string]any {
+		return map[string]any{"role": "assistant", "content": "", "timestamp": at,
 			"tool_calls": []map[string]any{{"id": id, "function": map[string]any{"name": "delegate_task", "arguments": args}}}}
 	}
 	result := func(id, content string, at float64) map[string]any {
@@ -599,23 +621,26 @@ func TestDelegates(t *testing.T) {
 	}
 	m.extra = []map[string]any{
 		// The last activity is 30 minutes old: the first read must still take its messages.
-		{"id": "par", "source": "matrix", "title": "Review", "model": "model-p", "started_at": now - 4000, "last_active": now - 1780, "message_count": 9},
+		{"id": "par", "source": "matrix", "title": "Review", "model": "model-p", "started_at": now - 4000, "last_active": now - 1780,
+			"message_count": 9, "input_tokens": 100, "output_tokens": 10, "api_call_count": 2},
 		{"id": "done", "source": "matrix", "title": "Ended", "model": "model-p", "started_at": now - 600, "last_active": now - 100, "ended_at": now - 100, "message_count": 3},
 	}
 	m.msgs = map[string][]map[string]any{
 		"par": {
-			call("old", `{"goal":"Old task"}`),
+			call("old", `{"goal":"Old task","option":"deep"}`, now-3501),
 			result("old", `{"status": "dispatched", "mode": "background", "count": 1, "delegation_id": "deleg_old1", "goals": ["Old task"]}`, now-3500),
-			{"role": "user", "content": "[ASYNC DELEGATION COMPLETE — deleg_old1]\nThe subagent did not complete successfully (status=error).", "timestamp": now - 3000},
-			call("sync", `{"goal":"Quick look"}`),
+			{"role": "user", "content": "[ASYNC DELEGATION COMPLETE — deleg_old1]\nStatus: error   API calls: 7   Duration: 9s\n--- RESULT ---\nThe subagent did not complete successfully (status=error).", "timestamp": now - 3000},
+			call("sync", `{"goal":"Quick look"}`, now-2501),
 			result("sync", `{"results": [{"status": "completed", "summary": "ok"}]}`, now-2500),
-			call("d1", `{"tasks":[{"goal":"Check the docs","model":"model-a"},{"goal":"Run the tests"}]}`),
-			result("d1", `{"status": "dispatched", "mode": "background", "count": 2, "delegation_id": "deleg_new1", "goals": ["Check the docs", "Run the tests"]}`, now-1785),
-			{"role": "assistant", "content": "Two helpers work on it.", "timestamp": now - 1780},
-			{"role": "user", "content": "Is deleg_new1 done?", "timestamp": now - 1779}, // no completion marker
+			call("d1", `{"tasks":[{"goal":"Check the docs","option":"deep"},{"goal":"Run the tests"},{"goal":"Pinned","model":"model-x","option":"deep"}]}`, now-1790),
+			result("d1", `{"status": "dispatched", "mode": "background", "count": 3, "delegation_id": "deleg_new1", "goals": ["Check the docs", "Run the tests", "Pinned"]}`, now-1785),
+			{"role": "assistant", "content": "Three helpers work on it.", "timestamp": now - 1780},
+			// One part of the batch ends: task 3 only.
+			{"role": "user", "content": "[ASYNC DELEGATION BATCH COMPLETE — deleg_new1]\nA background fan-out unit\n\n--- ✓ TASK 3/3: Pinned  (status=completed, api_calls=4, 12.5s) ---\nok", "timestamp": now - 1779},
+			{"role": "user", "content": "Is deleg_new1 done?", "timestamp": now - 1778}, // no completion marker
 		},
 		"done": {
-			call("d2", `{"goal":"Lost task"}`),
+			call("d2", `{"goal":"Lost task"}`, now-201),
 			result("d2", `{"status": "dispatched", "delegation_id": "deleg_lost", "goal": "Lost task"}`, now-200),
 		},
 	}
@@ -636,17 +661,29 @@ func TestDelegates(t *testing.T) {
 		for _, sa := range p.Subagents {
 			subs[strings.TrimPrefix(sa.ID, "hermes:par:")] = sa
 		}
-		if sa := subs["deleg_new1:0"]; !sa.Running || sa.Model != "model-a" || sa.Name != "Check the docs" || sa.Type != "delegate_task" || sa.StartedAt != int64((now-1785)*1000) {
-			t.Errorf("first delegate: %+v", sa)
+		if sa := subs["deleg_new1:0"]; !sa.Running || sa.Model != "model-deep" || sa.Name != "Check the docs" || sa.Type != "delegate_task" || sa.StartedAt != int64((now-1785)*1000) {
+			t.Errorf("a task with an option must use the model of the option: %+v", sa)
 		}
-		if sa := subs["deleg_new1:1"]; !sa.Running || sa.Model != "model-b" || sa.Name != "Run the tests" {
-			t.Errorf("second delegate must use delegation.model: %+v", sa)
+		if sa := subs["deleg_new1:1"]; !sa.Running || sa.Model != "model-main" || sa.Name != "Run the tests" {
+			t.Errorf("a task without an option must use the default option: %+v", sa)
 		}
-		if sa := subs["deleg_old1:0"]; sa.Running || !sa.Failed || sa.EndedAt != int64((now-3000)*1000) {
+		if sa := subs["deleg_new1:2"]; sa.Running || sa.Failed || sa.Model != "model-x" || sa.EndedAt != int64((now-1779)*1000) {
+			t.Errorf("a pinned task that ended in a batch part: %+v", sa)
+		}
+		if sa := subs["deleg_old1:0"]; sa.Running || !sa.Failed || sa.Model != "model-deep" || sa.EndedAt != int64((now-3000)*1000) {
 			t.Errorf("finished delegate: %+v", sa)
 		}
-		if len(subs) != 3 {
+		if len(subs) != 4 {
 			t.Errorf("a synchronous delegate_task result is not a background delegate: %v", subs)
+		}
+		if u := p.ModelTokens["model-deep"]; u == nil || u.Calls != 7 {
+			t.Errorf("delegate calls must count for the delegate model: %+v", p.ModelTokens)
+		}
+		if u := p.ModelTokens["model-x"]; u == nil || u.Calls != 4 {
+			t.Errorf("batch task calls: %+v", p.ModelTokens)
+		}
+		if u := p.ModelTokens["model-p"]; u == nil || u.Calls != 2 || u.In != 100 {
+			t.Errorf("parent tokens must stay with the parent model: %+v", p.ModelTokens)
 		}
 		if d := by["done"]; d == nil || d.Busy || len(d.Subagents) != 0 {
 			t.Errorf("an ended parent has no running delegates: %+v", d)
@@ -654,19 +691,150 @@ func TestDelegates(t *testing.T) {
 	}
 }
 
-func TestDelegatesParentModel(t *testing.T) {
+func TestDelegateModel(t *testing.T) {
 	msgs := []message{
 		{Role: "tool", ToolName: "delegate_task", Content: json.RawMessage(`"<untrusted_tool_result>{\"status\": \"dispatched\", \"delegation_id\": \"deleg_x\", \"count\": 2}"`), Timestamp: 1000},
 	}
 	ds := delegations(msgs)
-	if len(ds) != 1 || len(ds[0].goals) != 2 {
+	if len(ds) != 1 || len(ds[0].tasks) != 2 {
 		t.Fatalf("delegations: %+v", ds)
 	}
-	subs, running := delegates("s", ds, "model-p", false, 2000)
-	if !running || len(subs) != 2 || subs[0].Model != "model-p" || subs[0].Name != "delegate" {
-		t.Errorf("without delegation.model the delegates use the parent model: %+v", subs)
+	dr := delegates("s", ds, nil, "model-p", false, 2000, nil, nil)
+	subs := dr.subs
+	if !dr.running || len(subs) != 2 || subs[0].Model != unknownModel || subs[0].Name != "delegate" {
+		t.Errorf("without the config the model is unknown, not the parent model: %+v", subs)
 	}
-	if _, running := delegates("s", ds, "model-p", false, 1000+delegWindow+1); running {
+	subs = delegates("s", ds, &delegConfig{}, "model-p", false, 2000, nil, nil).subs
+	if subs[0].Model != "model-p" {
+		t.Errorf("an empty delegation.model means: the parent model: %+v", subs)
+	}
+	subs = delegates("s", ds, &delegConfig{Model: "model-b", Backend: "none"}, "model-p", false, 2000, nil, nil).subs
+	if subs[0].Model != "model-b" {
+		t.Errorf("delegation.model: %+v", subs)
+	}
+	if delegates("s", ds, nil, "model-p", false, 1000+delegWindow+1, nil, nil).running {
 		t.Error("a delegation without an end must stop after delegWindow")
+	}
+}
+
+func TestDelegateTools(t *testing.T) {
+	m := &mock{config: map[string]any{"delegation": map[string]any{"backend": "map",
+		"backends": map[string]any{"map": map[string]any{"default": "main", "options": []any{
+			map[string]any{"name": "main", "model": "model-main"},
+			map[string]any{"name": "deep", "model": "model-deep"},
+		}}}}}}
+	_, cfg := startMock(t, m)
+	now := m.now
+	m.extra = []map[string]any{{"id": "par", "source": "matrix", "title": "Review", "model": "model-p", "started_at": now - 400, "last_active": now - 290}}
+	m.kids = []map[string]any{
+		{"id": "other", "source": "subagent", "parent_session_id": "elsewhere", "model": "model-z", "preview": "Check the docs now", "started_at": now - 280},
+		{"id": "early", "source": "subagent", "parent_session_id": "par", "model": "model-z", "preview": "Check the docs again", "started_at": now - 900},
+		{"id": "k1", "source": "subagent", "parent_session_id": "par", "model": "model-real", "preview": "Check the docs now",
+			"started_at": now - 290, "last_active": now - 3, "input_tokens": 50, "output_tokens": 5, "api_call_count": 3},
+	}
+	m.msgs = map[string][]map[string]any{
+		"par": {
+			{"role": "assistant", "content": "", "timestamp": now - 300, "tool_calls": []map[string]any{{"id": "d", "function": map[string]any{"name": "delegate_task",
+				"arguments": `{"tasks":[{"goal":"Check the docs now","option":"deep"},{"goal":"Run the tests"}]}`}}}},
+			{"role": "tool", "tool_call_id": "d", "tool_name": "delegate_task", "timestamp": now - 299,
+				"content": `{"status": "dispatched", "mode": "background", "count": 2, "delegation_id": "deleg_t", "goals": ["Check the docs now", "Run the tests"]}`},
+		},
+		"k1": {
+			{"role": "user", "content": "Check the docs now", "timestamp": now - 290},
+			{"role": "assistant", "timestamp": now - 20, "tool_calls": []map[string]any{{"id": "w", "function": map[string]any{"name": "web_extract", "arguments": map[string]any{"urls": []string{"https://example.com/docs"}}}}}},
+			{"role": "tool", "tool_call_id": "w", "tool_name": "web_extract", "content": "text", "timestamp": now - 15},
+			{"role": "assistant", "timestamp": now - 3, "tool_calls": []map[string]any{{"id": "g", "function": map[string]any{"name": "mcp__srv__get_issue", "arguments": map[string]any{"number": 1}}}}},
+		},
+	}
+	src := New(cfg)
+	for round := range 2 {
+		if err := src.Refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		var p *collector.Session
+		for _, s := range src.Sessions(time.Now().UnixMilli()) {
+			if strings.HasSuffix(s.ID, ":par") {
+				p = s
+			}
+		}
+		if p == nil || !p.Busy {
+			t.Fatalf("round %d: parent: %+v", round, p)
+		}
+		subs := map[string]collector.Subagent{}
+		for _, sa := range p.Subagents {
+			subs[strings.TrimPrefix(sa.ID, "hermes:par:")] = sa
+		}
+		a := subs["deleg_t:0"]
+		if !a.Running || a.Model != "model-real" || !strings.HasPrefix(a.Doing, "mcp__srv__get_issue") {
+			t.Errorf("round %d: the child session gives the model and the current tool: %+v", round, a)
+		}
+		if b := subs["deleg_t:1"]; !b.Running || b.Model != "model-main" || b.Doing != "background task" {
+			t.Errorf("round %d: a task without a found child: %+v", round, b)
+		}
+		tool := false
+		for _, x := range p.RunningTools {
+			tool = tool || (x.Name == "mcp__srv__get_issue" && x.AgentID == "hermes:par:deleg_t:0" && x.Sink != "")
+		}
+		if !tool {
+			t.Errorf("round %d: the parent must show the open delegate tool: %+v", round, p.RunningTools)
+		}
+		flow := false
+		for _, f := range p.Flows {
+			flow = flow || (f.Tool == "web_extract" && f.AgentID == "hermes:par:deleg_t:0")
+		}
+		if !flow {
+			t.Errorf("round %d: the parent must show the delegate flows: %+v", round, p.Flows)
+		}
+		if u := p.ModelTokens["model-real"]; u == nil || u.In != 50 || u.Out != 5 || u.Calls != 3 {
+			t.Errorf("round %d: child tokens must count for the child model: %+v", round, p.ModelTokens)
+		}
+	}
+	detail := false
+	for _, x := range m.paths {
+		detail = detail || strings.HasPrefix(x, "GET /api/sessions/k1?")
+		if strings.HasPrefix(x, "POST") && !strings.Contains(x, "password-login") {
+			t.Errorf("only GET requests: %s", x)
+		}
+	}
+	if !detail {
+		t.Error("the second read must refresh the known child with the detail route")
+	}
+}
+
+func TestFindChild(t *testing.T) {
+	m := &mock{}
+	_, cfg := startMock(t, m)
+	now := m.now
+	goal := "Check the open issues of the first project and list them by age"
+	m.kids = []map[string]any{
+		{"id": "a", "source": "subagent", "parent_session_id": "p", "preview": "Check the open issues of the first project and list them by label", "started_at": now - 50},
+		{"id": "b", "source": "subagent", "parent_session_id": "p", "preview": goal, "started_at": now - 40},
+	}
+	c := newClient(cfg)
+	at := int64(now*1000) - 60_000
+	if r, ok := c.findChild(context.Background(), "p", goal, at, nil); !ok || r.ID != "b" {
+		t.Errorf("the child with the same goal must win: %+v", r)
+	}
+	if r, ok := c.findChild(context.Background(), "p", goal, at, map[string]bool{"b": true}); !ok || r.ID != "a" {
+		t.Errorf("a taken child must not match: %+v", r)
+	}
+	if _, ok := c.findChild(context.Background(), "q", goal, at, nil); ok {
+		t.Error("a child of a different parent must not match")
+	}
+}
+
+func TestDelegateDoing(t *testing.T) {
+	ds := []*delegation{{id: "deleg_a", at: 1000, tasks: []*dtask{{goal: "g"}, {goal: "h"}}}}
+	done := collector.Tool{Name: "web_search", Desc: "query"}
+	kids := map[string]*kid{
+		kidKey("s", "deleg_a", 0): {row: sessionRow{ID: "c0", Model: "model-c"}, act: activity{done: &done}},
+		kidKey("s", "deleg_a", 1): {row: sessionRow{ID: "c1", Model: "model-c", EndedAt: 1500}},
+	}
+	dr := delegates("s", ds, nil, "model-p", false, 2000, nil, kids)
+	if len(dr.subs) != 2 || dr.subs[0].Doing != "thinking · last: web_search: query" || dr.subs[0].Model != "model-c" {
+		t.Errorf("a delegate between tool calls: %+v", dr.subs)
+	}
+	if dr.subs[1].Running || dr.subs[1].EndedAt != 1500 {
+		t.Errorf("an ended child ends the task: %+v", dr.subs[1])
 	}
 }
