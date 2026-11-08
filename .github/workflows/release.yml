@@ -24,4 +24,13 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/release/* --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+        # A release made in the GitHub web UI also pushes the tag. Then the release exists:
+        # add the files and keep its title and notes.
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/release/* --clobber
+          elif ! gh release create "$GITHUB_REF_NAME" dist/release/* --title "$GITHUB_REF_NAME" --generate-notes --verify-tag; then
+            # The release was made while this job ran.
+            gh release view "$GITHUB_REF_NAME" >/dev/null
+            gh release upload "$GITHUB_REF_NAME" dist/release/* --clobber
+          fi
