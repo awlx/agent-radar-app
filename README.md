@@ -280,6 +280,17 @@ cd agent-radar-app
 go build -o agent-radar ./cmd/agent-radar
 ```
 
+### Use Nix on Linux
+
+The flake builds the server, the web UI and the GTK window. It does not include the GNOME Shell extension.
+
+```sh
+nix run github:awlx/agent-radar-app -- -app
+```
+
+To get a development shell with Go, gopls, Node.js and gjs, run `nix develop`.
+If you use [direnv](https://direnv.net/) with [nix-direnv](https://github.com/nix-community/nix-direnv), run `direnv allow` once in the clone. The shell then loads when you enter the directory.
+
 ### Start the server
 
 ```sh
