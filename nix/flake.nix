@@ -10,7 +10,7 @@
     in
     {
       packages = forAll (pkgs: rec {
-        agent-radar = pkgs.callPackage ./nix/package.nix { };
+        agent-radar = pkgs.callPackage ./package.nix { };
         default = agent-radar;
       });
       # `nix develop`, or automatically on `cd` through direnv (.envrc).
