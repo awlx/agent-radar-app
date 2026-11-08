@@ -30,6 +30,14 @@ jobs:
       - run: node --test internal/server/ui/graph.test.mjs
       - run: node --test linux/extension/status.test.mjs linux/extension/startup.test.mjs
 
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - name: nix flake check (package, tests, window wrapper, dev shell)
+        run: nix flake check ./nix -L
+
   macos-app:
     runs-on: macos-latest
     steps:

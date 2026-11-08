@@ -290,6 +290,7 @@ nix run "github:awlx/agent-radar-app?dir=nix" -- -app
 
 To get a development shell with Go, gopls, Node.js and gjs, run `nix develop ./nix`.
 If you use [direnv](https://direnv.net/) with [nix-direnv](https://github.com/nix-community/nix-direnv), run `direnv allow` once in the clone. The shell then loads when you enter the directory.
+To build the package and run all tests in the Nix sandbox, run `nix flake check ./nix`.
 
 ### Start the server
 

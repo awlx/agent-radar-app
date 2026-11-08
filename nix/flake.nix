@@ -23,6 +23,11 @@
           packages = [ pkgs.gopls pkgs.nodejs pkgs.gjs ];
         };
       });
+      checks = forAll (pkgs: import ./checks.nix {
+        inherit pkgs;
+        agent-radar = self.packages.${pkgs.stdenv.hostPlatform.system}.agent-radar;
+        dev-shell = self.devShells.${pkgs.stdenv.hostPlatform.system}.default;
+      });
       apps = forAll (pkgs: {
         default = {
           type = "app";
