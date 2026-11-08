@@ -408,8 +408,13 @@ Refer to [Linux and GNOME](docs/linux.md) for native runtime checks.
 To make new screenshots, start `agent-radar -demo` and use a browser at a width of 1440 pixels.
 Do not make screenshots with real session data, because the data can contain private names and paths.
 
-To make a release, push a tag that starts with `v`, for example `v0.2.0`.
-The release workflow builds the files with `scripts/release.sh` and publishes the release.
+To make a release, do one of these steps. Use a tag that starts with `v`, for example `v0.2.0`.
+
+- Push the tag. The release workflow makes the release with generated notes.
+- Publish the release in the GitHub web UI with a new tag. The workflow adds the files to that release. It keeps your title and notes.
+
+The release workflow builds the files with `scripts/release.sh`.
+A draft release does not make the tag. Thus it does not start the workflow.
 
 Refer to [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
