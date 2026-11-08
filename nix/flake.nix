@@ -13,14 +13,10 @@
         agent-radar = pkgs.callPackage ./package.nix { };
         default = agent-radar;
       });
-      # `nix develop`, or automatically on `cd` through direnv (.envrc).
-      # Everything the package builds with, plus the tools CONTRIBUTING.md
-      # asks for: gofmt/go vet/go test, Node.js for the graph test, and gjs to
-      # run the window with `go run ./cmd/agent-radar -app`.
       devShells = forAll (pkgs: {
-        default = pkgs.mkShell {
-          inputsFrom = [ self.packages.${pkgs.stdenv.hostPlatform.system}.agent-radar ];
-          packages = [ pkgs.gopls pkgs.nodejs pkgs.gjs ];
+        default = import ./shell.nix {
+          inherit pkgs;
+          agent-radar = self.packages.${pkgs.stdenv.hostPlatform.system}.agent-radar;
         };
       });
       checks = forAll (pkgs: import ./checks.nix {

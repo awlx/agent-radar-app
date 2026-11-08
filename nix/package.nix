@@ -21,7 +21,14 @@ buildGoModule {
   pname = "agent-radar";
   inherit version;
 
-  src = lib.cleanSource ../.;
+  # Only what Go and the tests need, so the flake and nix-build see the same
+  # source (and a README edit does not rebuild anything).
+  src = lib.fileset.toSource {
+    root = ../.;
+    fileset = lib.fileset.unions [
+      ../go.mod ../go.sum ../cmd ../internal ../linux ../macos ../windows
+    ];
+  };
   vendorHash = "sha256-ONovBTO6abi23A4pgm1reVdTaYN6uAY5mU9luG81Wbw=";
 
   subPackages = [ "cmd/agent-radar" ];

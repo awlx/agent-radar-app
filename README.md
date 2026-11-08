@@ -282,15 +282,17 @@ go build -o agent-radar ./cmd/agent-radar
 
 ### Use Nix on Linux
 
-The flake in `nix/` builds the server, the web UI and the GTK window. It does not include the GNOME Shell extension.
+The files in `nix/` build the server, the web UI and the GTK window. They do not include the GNOME Shell extension.
+The flake and the classic Nix commands use the same nixpkgs from `nix/flake.lock` and build the same package.
 
-```sh
-nix run "github:awlx/agent-radar-app?dir=nix" -- -app
-```
+| Task | With flakes | Without flakes |
+|------|-------------|----------------|
+| Run the window | `nix run "github:awlx/agent-radar-app?dir=nix" -- -app` | `nix-build nix && ./result/bin/agent-radar -app` |
+| Development shell | `nix develop ./nix` | `nix-shell nix/shell.nix` |
+| Build and run all tests | `nix flake check ./nix` | `nix-build nix/checks.nix` |
 
-To get a development shell with Go, gopls, Node.js and gjs, run `nix develop ./nix`.
-If you use [direnv](https://direnv.net/) with [nix-direnv](https://github.com/nix-community/nix-direnv), run `direnv allow` once in the clone. The shell then loads when you enter the directory.
-To build the package and run all tests in the Nix sandbox, run `nix flake check ./nix`.
+The development shell has Go, gopls, Node.js and gjs.
+If you use [direnv](https://direnv.net/) with [nix-direnv](https://github.com/nix-community/nix-direnv), run `direnv allow` once in the clone. The shell then loads when you enter the directory. It uses the flake if your Nix has flakes, and `nix/shell.nix` if not.
 
 ### Start the server
 

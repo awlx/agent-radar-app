@@ -1,6 +1,11 @@
-{ pkgs, agent-radar, dev-shell }:
+# `nix flake check ./nix` builds all of these; without flakes,
+# `nix-build nix/checks.nix` does.
+{
+  pkgs ? import ./nixpkgs.nix { },
+  agent-radar ? import ./default.nix { inherit pkgs; },
+  dev-shell ? import ./shell.nix { inherit pkgs agent-radar; },
+}:
 
-# `nix flake check ./nix` builds all of these.
 {
   # The package itself. Fails first when go.mod changed and vendorHash did not.
   package = agent-radar;
